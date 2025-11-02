@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: aiassist-telegram-bot
+
+server:
+  port: 3000
+
+telegram:
+  bot:
+    token: ${TELEGRAM_BOT_TOKEN:your-telegram-bot-token}
+    username: ${TELEGRAM_BOT_USERNAME:your-bot-username}
+
+claude:
+  api:
+    key: ${CLAUDE_API_KEY:your-claude-api-key}
+    model: ${CLAUDE_MODEL:claude-haiku-4-5-20251001}
+    max-tokens: ${CLAUDE_MAX_TOKENS:1024}
+    api-url: ${CLAUDE_API_URL:https://api.anthropic.com/v1/messages}
+    version: ${CLAUDE_API_VERSION:2023-06-01}
+
+logging:
+  level:
+    root: INFO
+    com.aiassist.bot: DEBUG
+    io.ktor.client: INFO
