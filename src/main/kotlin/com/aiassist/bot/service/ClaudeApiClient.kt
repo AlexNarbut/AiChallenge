@@ -20,7 +20,9 @@ private val logger = KotlinLogging.logger {}
 
 @Service
 class ClaudeApiClient(
-    private val config: ClaudeApiConfig
+    private val config: ClaudeApiConfig,
+    private val formatPromptLoader: FormatPromptLoader,
+    private val responseParser: ResponseParser
 ) {
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
@@ -37,7 +39,17 @@ class ClaudeApiClient(
 
     suspend fun sendMessageWithHistory(userMessage: String, history: MutableList<Message>): String {
         return try {
-            logger.info { "Sending message to Claude API with ${history.size} previous messages" }
+            logger.info { "Sending message to Claude API with ${history.size} previous messages and format: ${config.responseFormat}" }
+
+            // Get system prompt based on response format
+
+            val responseFormatPrompt = when (config.responseFormat.lowercase()) {
+                "json" -> formatPromptLoader.getPromptForFormat("json")
+                "xml" -> formatPromptLoader.getPromptForFormat("xml")
+                else -> ""
+            }
+
+            val systemPrompt = responseFormatPrompt
 
             // Add user message to history
             history.add(Message(role = "user", content = userMessage))
@@ -45,7 +57,8 @@ class ClaudeApiClient(
             val request = ClaudeRequest(
                 model = config.model,
                 maxTokens = config.maxTokens,
-                messages = history.toList()
+                messages = history.toList(),
+                system = systemPrompt
             )
 
             val httpResponse = client.post(config.apiUrl) {
@@ -61,10 +74,19 @@ class ClaudeApiClient(
 
                 val assistantMessage = response.content.firstOrNull()?.text ?: "No response from Claude API"
 
+                // Log the full raw response from Claude
+                logger.info { "Raw Claude response:\n$assistantMessage" }
+
                 // Add assistant response to history
                 history.add(Message(role = "assistant", content = assistantMessage))
 
-                assistantMessage
+                // Parse response based on format
+                val parsedMessage = responseParser.parseResponse(assistantMessage, config.responseFormat)
+
+                // Log the parsed response
+                logger.info { "Parsed response:\n$parsedMessage" }
+
+                parsedMessage
             } else {
                 val errorResponse: ClaudeErrorResponse = httpResponse.body()
                 logger.error { "Claude API error: ${errorResponse.error.type} - ${errorResponse.error.message}" }

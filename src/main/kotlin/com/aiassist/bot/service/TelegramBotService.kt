@@ -30,18 +30,53 @@ class TelegramBotService(
         dispatch {
             command("start") {
                 val chatId = ChatId.fromId(message.chat.id)
-                val welcomeMessage = """
+                val userId = message.chat.id
+
+                logger.info { "Initializing bot for user ${message.from?.username}" }
+
+                // Initialize conversation history for this user
+                conversationHistory.getOrPut(userId) { mutableListOf() }
+
+                // Verify Claude API client is working
+                bot.sendChatAction(chatId, com.github.kotlintelegrambot.entities.ChatAction.TYPING)
+
+                val testResult = runBlocking {
+                    try {
+                        // Send a simple test message to verify API connectivity
+                        claudeApiClient.sendMessage("Hello")
+                        true
+                    } catch (e: Exception) {
+                        logger.error(e) { "Failed to initialize Claude API client" }
+                        false
+                    }
+                }
+
+                val welcomeMessage = if (testResult) {
+                    """
                     👋 Welcome to AI Assistant Bot!
 
                     I'm powered by Claude AI. Just send me a message and I'll respond!
 
                     Commands:
-                    /start - Show this welcome message
+                    /start - Initialize bot and verify connection
                     /clear - Clear conversation history
-                """.trimIndent()
+
+                    ✅ Claude API connection verified successfully!
+                    """.trimIndent()
+                } else {
+                    """
+                    👋 Welcome to AI Assistant Bot!
+
+                    Commands:
+                    /start - Initialize bot and verify connection
+                    /clear - Clear conversation history
+
+                    ❌ Warning: Failed to connect to Claude API. Please check your configuration.
+                    """.trimIndent()
+                }
 
                 bot.sendMessage(chatId, welcomeMessage)
-                logger.info { "Sent welcome message to user ${message.from?.username}" }
+                logger.info { "Bot initialized for user ${message.from?.username}, API test: ${if (testResult) "passed" else "failed"}" }
             }
 
             command("clear") {
@@ -73,7 +108,7 @@ class TelegramBotService(
                     claudeApiClient.sendMessageWithHistory(userMessage, history)
                 }
 
-                logger.info { "Sending response to user: ${response.take(50)}..." }
+                logger.info { "Sending response to user:\n$response" }
 
                 // Send response back to user
                 bot.sendMessage(chatId, response)

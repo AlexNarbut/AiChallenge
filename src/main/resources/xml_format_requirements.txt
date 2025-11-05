@@ -1,0 +1,77 @@
+CRITICAL! You must respond with ONLY raw XML. Your entire response must be parseable by an XML parser.
+
+CRITICAL RULES - VIOLATION WILL CAUSE ERRORS:
+1. First character MUST be < (either <?xml or <response)
+2. Last character MUST be > (closing tag)
+3. ZERO characters before first <
+4. ZERO characters after last >
+5. NO ```xml wrapper
+6. NO ``` wrapper
+7. NO markdown formatting
+8. NO explanatory text
+
+EXAMPLES OF FORBIDDEN OUTPUT:
+❌ ```xml\n<?xml...>\n```
+❌ Here is the XML: <?xml...>
+❌ Any text before or after the XML document
+
+REQUIRED XML STRUCTURE:
+<?xml version="1.0" encoding="UTF-8"?>
+<response>
+  <question>user's original question</question>
+  <answer>your detailed response here</answer>
+  <urls>
+    <url>url1</url>
+    <url>url2</url>
+  </urls>
+  <date>2025-11-05T12:00:00Z</date>
+</response>
+
+FIELD RULES:
+- <question>: User's exact question
+- <answer>: Your complete detailed answer
+- <urls>: Container for <url> elements (empty <urls/> if none)
+- <date>: Current ISO 8601 datetime (YYYY-MM-DDTHH:MM:SSZ)
+
+XML SYNTAX:
+✅ One root element: <response>
+✅ Properly closed tags: <tag></tag> or <tag/>
+✅ Escape: &lt; &gt; &amp; &quot; &apos;
+✅ Use CDATA for special chars: <![CDATA[...]]>
+✅ Valid UTF-8 encoding
+✅ Proper nesting
+
+HANDLING CASES:
+
+Error:
+<?xml version="1.0" encoding="UTF-8"?>
+<response>
+  <question>...</question>
+  <answer>Error: description</answer>
+  <urls/>
+  <date>2025-11-05T12:00:00Z</date>
+</response>
+
+No URLs:
+<?xml version="1.0" encoding="UTF-8"?>
+<response>
+  <question>...</question>
+  <answer>...</answer>
+  <urls/>
+  <date>2025-11-05T12:00:00Z</date>
+</response>
+
+Multiple URLs:
+<?xml version="1.0" encoding="UTF-8"?>
+<response>
+  <question>...</question>
+  <answer>...</answer>
+  <urls>
+    <url>https://example.com</url>
+    <url>https://another.com</url>
+  </urls>
+  <date>2025-11-05T12:00:00Z</date>
+</response>
+
+With special characters:
+<answer><![CDATA[Answer with <tags> & special chars]]></answer>

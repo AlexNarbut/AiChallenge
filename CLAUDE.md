@@ -100,6 +100,7 @@ Required environment variables:
 Optional configuration in `application.yml`:
 - `claude.api.model`: Claude model to use (default: claude-3-5-sonnet-20241022)
 - `claude.api.max-tokens`: Maximum tokens in response (default: 1024)
+- `claude.api.response-format`: Response format (default: text, options: text, json, xml)
 
 ## Development Notes
 
@@ -141,3 +142,47 @@ Edit `ClaudeApiConfig` and `application.yml` to add new parameters, then update 
 
 **Adding conversation history:**
 Currently, each message is independent. To add context, maintain a conversation history (Map of chatId to message list) and include previous messages in the `messages` array sent to Claude API.
+
+## Response Format Feature
+
+The bot supports structured response formats (JSON and XML) in addition to plain text responses.
+
+**FormatPromptLoader** (`service/FormatPromptLoader.kt`):
+- Service that loads format requirement prompts from text files
+- Prompts are loaded from `json_format_requirements.txt` and `xml_format_requirements.txt`
+- These prompts instruct Claude to respond in specific formats
+
+**ResponseParser** (`service/ResponseParser.kt`):
+- Parses structured responses (JSON/XML) and formats them for display
+- Validates response format
+- Extracts fields: question, answer, urls, date
+- Handles parsing errors gracefully
+
+**How it works:**
+1. Configure response format via `CLAUDE_RESPONSE_FORMAT` environment variable (text/json/xml)
+2. The appropriate system prompt is loaded from the format requirements file
+3. System prompt is sent as a top-level `system` parameter in the Claude API request
+4. Claude API receives the system parameter along with the messages array and responds in the specified format
+5. ResponseParser parses the structured response and formats it for the user
+6. User receives a nicely formatted message with the extracted information
+
+**Example - JSON format:**
+```bash
+CLAUDE_RESPONSE_FORMAT=json ./gradlew bootRun
+```
+
+**Example - XML format:**
+```bash
+CLAUDE_RESPONSE_FORMAT=xml ./gradlew bootRun
+```
+
+**Format requirement files:**
+- `src/main/resources/json_format_requirements.txt`: Instructions for JSON responses
+- `src/main/resources/xml_format_requirements.txt`: Instructions for XML responses
+
+**Customizing format prompts:**
+Edit the format requirement files to modify the structure or add/remove fields. The ResponseParser expects the following fields:
+- `question`: User's original question
+- `answer`: AI's detailed response
+- `urls`: List of source URLs (can be empty)
+- `date`: ISO 8601 timestamp

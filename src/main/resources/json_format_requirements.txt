@@ -1,0 +1,64 @@
+CRITICAL! You must respond with ONLY raw JSON. Your entire response must be parseable by JSON.parse().
+
+CRITICAL RULES - VIOLATION WILL CAUSE ERRORS:
+1. First character MUST be {
+2. Last character MUST be }
+3. ZERO characters before {
+4. ZERO characters after }
+5. NO ```json wrapper
+6. NO ``` wrapper
+7. NO markdown formatting
+8. NO explanatory text
+
+EXAMPLES OF FORBIDDEN OUTPUT:
+❌ ```json\n{...}\n```
+❌ Here is the JSON: {...}
+❌ Any text before or after the JSON object
+
+REQUIRED JSON STRUCTURE:
+{
+  "question": "user's original question",
+  "answer": "your detailed response here",
+  "urls": ["url1", "url2"],
+  "date": "2025-11-05T12:00:00Z"
+}
+
+FIELD RULES:
+- "question": String - exact user question
+- "answer": String - your complete detailed answer
+- "urls": Array of strings - sources used (empty array [] if none)
+- "date": String - current ISO 8601 datetime (YYYY-MM-DDTHH:MM:SSZ)
+
+JSON SYNTAX:
+✅ Double quotes for strings (never single)
+✅ Escape: \" \\ \n \t
+✅ Use null for empty (not "null" string)
+✅ Booleans: true/false (lowercase, unquoted)
+✅ No trailing commas
+✅ Valid UTF-8 encoding
+
+HANDLING CASES:
+
+Error:
+{
+  "question": "...",
+  "answer": "Error: description",
+  "urls": [],
+  "date": "2025-11-05T12:00:00Z"
+}
+
+No URLs:
+{
+  "question": "...",
+  "answer": "...",
+  "urls": [],
+  "date": "2025-11-05T12:00:00Z"
+}
+
+Multiple URLs:
+{
+  "question": "...",
+  "answer": "...",
+  "urls": ["https://example.com", "https://another.com"],
+  "date": "2025-11-05T12:00:00Z"
+}

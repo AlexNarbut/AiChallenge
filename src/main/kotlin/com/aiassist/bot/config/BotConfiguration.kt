@@ -14,5 +14,6 @@ data class ClaudeApiConfig(
     var model: String = "",
     var maxTokens: Int = 1024,
     var apiUrl: String = "",
-    var version: String = ""
+    var version: String = "",
+    var responseFormat: String = "text" // Options: "text", "json", "xml"
 )

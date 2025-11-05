@@ -7,7 +7,8 @@ data class ClaudeRequest(
     val model: String,
     @JsonProperty("max_tokens")
     val maxTokens: Int,
-    val messages: List<Message>
+    val messages: List<Message>,
+    val system: String? = null
 )
 
 data class Message(
