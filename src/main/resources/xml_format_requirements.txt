@@ -1,4 +1,6 @@
-CRITICAL! You must respond with ONLY raw XML. Your entire response must be parseable by an XML parser.
+CRITICAL! You must respond with ONLY raw XML. Your entire response must be valid XML format.
+After you have prepared your response, check the received XML for validity and, if necessary, correct it to comply with the format requirements.
+
 
 CRITICAL RULES - VIOLATION WILL CAUSE ERRORS:
 1. First character MUST be < (either <?xml or <response)

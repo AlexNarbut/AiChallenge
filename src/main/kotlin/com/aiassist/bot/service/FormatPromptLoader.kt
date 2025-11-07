@@ -1,5 +1,6 @@
 package com.aiassist.bot.service
 
+import com.aiassist.bot.config.ClaudeApiConfig
 import mu.KotlinLogging
 import org.springframework.core.io.ClassPathResource
 import org.springframework.stereotype.Service
@@ -8,7 +9,9 @@ import java.io.IOException
 private val logger = KotlinLogging.logger {}
 
 @Service
-class FormatPromptLoader {
+class FormatPromptLoader(
+    private val config: ClaudeApiConfig
+) {
 
     private val prompts = mutableMapOf<String, String>()
 
@@ -20,9 +23,10 @@ class FormatPromptLoader {
         try {
             prompts["json"] = loadPromptFromFile("json_format_requirements.txt")
             prompts["xml"] = loadPromptFromFile("xml_format_requirements.txt")
-            logger.info { "Successfully loaded format prompts for: ${prompts.keys}" }
+            prompts["expert"] = loadPromptFromFile("${config.expertPrompt}.txt")
+            logger.info { "Successfully loaded prompts for: ${prompts.keys}" }
         } catch (e: Exception) {
-            logger.error(e) { "Error loading format prompts" }
+            logger.error(e) { "Error loading prompts" }
         }
     }
 

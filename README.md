@@ -56,6 +56,7 @@ Configuration can be set in `src/main/resources/application.yml` or via environm
 
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token
 - `TELEGRAM_BOT_USERNAME`: Bot username
+- `TELEGRAM_MAX_MESSAGE_LENGTH`: Maximum message length before switching to PDF (default: 4000)
 - `CLAUDE_API_KEY`: Claude API key
 - `CLAUDE_RESPONSE_FORMAT`: Response format - `text` (default), `json`, or `xml`
 
@@ -104,11 +105,13 @@ src/main/kotlin/com/aiassist/bot/
 └── service/
     ├── ClaudeApiClient.kt       # Claude API client
     ├── FormatPromptLoader.kt    # Loads format requirement prompts
+    ├── PdfGenerator.kt          # Generates PDF documents
     ├── ResponseParser.kt        # Parses JSON/XML responses
     └── TelegramBotService.kt    # Telegram bot service
 
 src/main/resources/
 ├── application.yml              # Application configuration
+├── expert_system_prompt.txt     # System prompt for expert mode
 ├── json_format_requirements.txt # System prompt for JSON format
 └── xml_format_requirements.txt  # System prompt for XML format
 ```
@@ -124,7 +127,45 @@ src/main/resources/
 ### Commands
 
 - `/start` - Initialize bot and verify Claude API connection
+- `/expert` - Switch to expert mode (fitness trainer)
+- `/normal` - Switch back to normal conversation mode
 - `/clear` - Clear conversation history for your chat
+
+### Expert Mode
+
+The bot includes an **Expert Mode** feature that allows you to interact with specialized AI personas. Currently includes a fitness trainer expert that helps create personalized training programs.
+
+**How to use Expert Mode:**
+
+1. Send `/expert` to activate expert mode
+2. The fitness trainer will guide you through a survey to create a personalized workout plan
+3. Answer the questions one by one
+4. Get a customized weekly training program
+5. Send `/normal` to return to regular conversation mode
+
+**Expert system prompts are stored in:**
+- `src/main/resources/expert_system_prompt.txt` - Contains the expert persona definition and behavior rules
+
+You can customize the expert prompt or add new expert modes by creating additional prompt files and modifying the configuration.
+
+### Long Response Handling
+
+When responses exceed the configured maximum message length (default: 4000 characters), the bot automatically generates and sends a PDF document instead of a text message.
+
+**Features:**
+- Automatic detection of long responses
+- PDF generation with formatted content
+- Proper titles based on mode (e.g., "Fitness Training Plan" for expert mode)
+- Timestamp included in PDF
+- Automatic cleanup of temporary files
+- Fallback to truncated text if PDF generation fails
+
+**Configuration:**
+```bash
+TELEGRAM_MAX_MESSAGE_LENGTH=4000 ./gradlew bootRun
+```
+
+This is particularly useful for expert mode responses like training plans that can be quite lengthy.
 
 ## Development
 

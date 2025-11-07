@@ -27,6 +27,27 @@ class ResponseParserTest {
     }
 
     @Test
+    fun `test JSON parsing with markdown code blocks`() {
+        val jsonResponse = """
+            ```json
+            {
+              "question": "What is Kotlin?",
+              "answer": "Kotlin is a modern programming language",
+              "urls": ["https://kotlinlang.org"],
+              "date": "2025-11-05T12:00:00Z"
+            }
+            ```
+        """.trimIndent()
+
+        val result = parser.parseResponse(jsonResponse, "json")
+
+        assertTrue(result.contains("What is Kotlin?"))
+        assertTrue(result.contains("Kotlin is a modern programming language"))
+        assertTrue(result.contains("https://kotlinlang.org"))
+        assertTrue(result.contains("2025-11-05T12:00:00Z"))
+    }
+
+    @Test
     fun `test XML parsing with valid response`() {
         val xmlResponse = """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -38,6 +59,30 @@ class ResponseParserTest {
               </urls>
               <date>2025-11-05T12:00:00Z</date>
             </response>
+        """.trimIndent()
+
+        val result = parser.parseResponse(xmlResponse, "xml")
+
+        assertTrue(result.contains("What is Spring Boot?"))
+        assertTrue(result.contains("Spring Boot is a framework"))
+        assertTrue(result.contains("https://spring.io"))
+        assertTrue(result.contains("2025-11-05T12:00:00Z"))
+    }
+
+    @Test
+    fun `test XML parsing with markdown code blocks`() {
+        val xmlResponse = """
+            ```xml
+            <?xml version="1.0" encoding="UTF-8"?>
+            <response>
+              <question>What is Spring Boot?</question>
+              <answer>Spring Boot is a framework</answer>
+              <urls>
+                <url>https://spring.io</url>
+              </urls>
+              <date>2025-11-05T12:00:00Z</date>
+            </response>
+            ```
         """.trimIndent()
 
         val result = parser.parseResponse(xmlResponse, "xml")

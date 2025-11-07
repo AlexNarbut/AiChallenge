@@ -33,7 +33,15 @@ class ResponseParser {
      */
     private fun parseJsonResponse(response: String): String {
         return try {
-            val jsonNode = objectMapper.readTree(response)
+            // Strip markdown code blocks if present
+            val cleanedResponse = response
+                .trim()
+                .removePrefix("```json")
+                .removePrefix("```")
+                .removeSuffix("```")
+                .trim()
+
+            val jsonNode = objectMapper.readTree(cleanedResponse)
 
             val question = jsonNode.get("question")?.asText() ?: ""
             val answer = jsonNode.get("answer")?.asText() ?: ""
@@ -72,9 +80,17 @@ class ResponseParser {
      */
     private fun parseXmlResponse(response: String): String {
         return try {
+            // Strip markdown code blocks if present
+            val cleanedResponse = response
+                .trim()
+                .removePrefix("```xml")
+                .removePrefix("```")
+                .removeSuffix("```")
+                .trim()
+
             val dbFactory = DocumentBuilderFactory.newInstance()
             val dBuilder = dbFactory.newDocumentBuilder()
-            val doc: Document = dBuilder.parse(InputSource(StringReader(response)))
+            val doc: Document = dBuilder.parse(InputSource(StringReader(cleanedResponse)))
             doc.documentElement.normalize()
 
             val root = doc.documentElement

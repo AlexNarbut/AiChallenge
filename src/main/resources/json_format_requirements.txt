@@ -1,4 +1,5 @@
-CRITICAL! You must respond with ONLY raw JSON. Your entire response must be parseable by JSON.parse().
+CRITICAL! You must respond with ONLY raw JSON. Your entire response must be valid JSON format.
+After you have prepared your response, check the received JSON for validity and, if necessary, correct it to comply with the format requirements.
 
 CRITICAL RULES - VIOLATION WILL CAUSE ERRORS:
 1. First character MUST be {

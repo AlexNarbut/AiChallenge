@@ -9,6 +9,7 @@ telegram:
   bot:
     token: ${TELEGRAM_BOT_TOKEN:your-telegram-bot-token}
     username: ${TELEGRAM_BOT_USERNAME:your-bot-username}
+    max-message-length: ${TELEGRAM_MAX_MESSAGE_LENGTH:4000}
 
 claude:
   api:
@@ -18,6 +19,7 @@ claude:
     api-url: ${CLAUDE_API_URL:https://api.anthropic.com/v1/messages}
     version: ${CLAUDE_API_VERSION:2023-06-01}
     response-format: ${CLAUDE_RESPONSE_FORMAT:text}
+    expert-prompt: ${CLAUDE_EXPERT_PROMPT:expert_system_prompt}
 
 logging:
   level:

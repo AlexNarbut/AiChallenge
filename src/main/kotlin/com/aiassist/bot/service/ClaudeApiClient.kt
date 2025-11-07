@@ -33,23 +33,26 @@ class ClaudeApiClient(
         }
     }
 
-    suspend fun sendMessage(userMessage: String): String {
-        return sendMessageWithHistory(userMessage, mutableListOf())
+    suspend fun sendMessage(userMessage: String, isExpertMode: Boolean = false): String {
+        return sendMessageWithHistory(userMessage, mutableListOf(), isExpertMode)
     }
 
-    suspend fun sendMessageWithHistory(userMessage: String, history: MutableList<Message>): String {
+    suspend fun sendMessageWithHistory(userMessage: String, history: MutableList<Message>, isExpertMode: Boolean = false): String {
         return try {
-            logger.info { "Sending message to Claude API with ${history.size} previous messages and format: ${config.responseFormat}" }
+            logger.info { "Sending message to Claude API with ${history.size} previous messages, format: ${config.responseFormat}, expert mode: $isExpertMode" }
 
-            // Get system prompt based on response format
-
-            val responseFormatPrompt = when (config.responseFormat.lowercase()) {
-                "json" -> formatPromptLoader.getPromptForFormat("json")
-                "xml" -> formatPromptLoader.getPromptForFormat("xml")
-                else -> ""
+            // Determine system prompt based on expert mode and response format
+            val systemPrompt = if (isExpertMode) {
+                // In expert mode, use expert prompt
+                formatPromptLoader.getPromptForFormat("expert") ?: ""
+            } else {
+                // In normal mode, use format-specific prompt
+                when (config.responseFormat.lowercase()) {
+                    "json" -> formatPromptLoader.getPromptForFormat("json")
+                    "xml" -> formatPromptLoader.getPromptForFormat("xml")
+                    else -> ""
+                } ?: ""
             }
-
-            val systemPrompt = responseFormatPrompt
 
             // Add user message to history
             history.add(Message(role = "user", content = userMessage))
@@ -80,8 +83,12 @@ class ClaudeApiClient(
                 // Add assistant response to history
                 history.add(Message(role = "assistant", content = assistantMessage))
 
-                // Parse response based on format
-                val parsedMessage = responseParser.parseResponse(assistantMessage, config.responseFormat)
+                // Parse response based on format (skip parsing in expert mode)
+                val parsedMessage = if (isExpertMode) {
+                    assistantMessage // Return raw response in expert mode
+                } else {
+                    responseParser.parseResponse(assistantMessage, config.responseFormat)
+                }
 
                 // Log the parsed response
                 logger.info { "Parsed response:\n$parsedMessage" }

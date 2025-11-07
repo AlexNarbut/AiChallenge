@@ -141,7 +141,10 @@ dispatch {
 Edit `ClaudeApiConfig` and `application.yml` to add new parameters, then update `ClaudeRequest` model and usage in `ClaudeApiClient`.
 
 **Adding conversation history:**
-Currently, each message is independent. To add context, maintain a conversation history (Map of chatId to message list) and include previous messages in the `messages` array sent to Claude API.
+The bot maintains conversation history per user in a ConcurrentHashMap. Each user's messages are stored separately and sent to Claude API to maintain context across multiple interactions.
+
+**Expert Mode:**
+The bot supports switching between normal conversation mode and expert mode (specialized personas). Expert mode state is tracked per user and affects which system prompt is used.
 
 ## Response Format Feature
 
@@ -186,3 +189,66 @@ Edit the format requirement files to modify the structure or add/remove fields. 
 - `answer`: AI's detailed response
 - `urls`: List of source URLs (can be empty)
 - `date`: ISO 8601 timestamp
+
+## Expert Mode Feature
+
+The bot supports specialized expert modes where Claude takes on specific personas with detailed instructions and behaviors.
+
+**Key Components:**
+
+**Expert Mode Tracking** (`TelegramBotService.kt`):
+- Maintains a ConcurrentHashMap tracking which users are in expert mode
+- Switches between normal and expert mode via commands
+- Clears conversation history when switching modes
+
+**Commands:**
+- `/expert` - Activate expert mode (currently: fitness trainer)
+- `/normal` - Return to normal conversation mode
+
+**How it works:**
+1. User sends `/expert` command
+2. Bot sets expert mode flag for that user and clears history
+3. All subsequent messages use the expert system prompt instead of format prompts
+4. Expert prompt is loaded from `expert_system_prompt.txt`
+5. User sends `/normal` to exit expert mode
+
+**Expert Prompt File:**
+- `src/main/resources/expert_system_prompt.txt` - Contains the fitness trainer persona with survey protocol and plan generation instructions
+
+**Adding New Expert Modes:**
+1. Create a new system prompt file in `src/main/resources/`
+2. Update `ClaudeApiConfig.expertPrompt` to reference the new file
+3. Modify `FormatPromptLoader` to load additional expert prompts
+4. Add command handlers in `TelegramBotService` to switch between expert types
+
+**Note:** Expert mode and response format features are independent. Expert mode uses its own system prompt and bypasses response parsing.
+
+## Long Response Handling (PDF Generation)
+
+When responses exceed a configurable length threshold, the bot automatically generates and sends a PDF document.
+
+**PdfGenerator** (`service/PdfGenerator.kt`):
+- Uses iText7 library to generate PDF documents
+- Creates formatted PDFs with title, timestamp, and content
+- Supports both file and byte array output
+- Automatically cleans up temporary files
+
+**Configuration** (`config/BotConfiguration.kt`):
+- `maxMessageLength` in `TelegramBotConfig` (default: 4000 characters)
+- Configurable via `TELEGRAM_MAX_MESSAGE_LENGTH` environment variable
+
+**How it works:**
+1. Bot receives response from Claude API
+2. Checks if response length exceeds `maxMessageLength`
+3. If yes: generates PDF with appropriate title based on mode
+4. Sends PDF as document via Telegram
+5. Cleans up temporary file
+6. If PDF generation fails: sends truncated text as fallback
+
+**Implementation** (`TelegramBotService.kt:167-198`):
+- Automatic length detection
+- Mode-aware PDF titles (e.g., "Fitness Training Plan" for expert mode)
+- Error handling with fallback to truncated text
+- Proper resource cleanup
+
+This feature is especially useful for expert mode responses like detailed training plans that often exceed Telegram's message limits.
