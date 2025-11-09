@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ CRITICAL RULES
+
+**Documentation Policy:**
+- **NEVER** create new .md files under any circumstances
+- **ONLY** two .md files are allowed in this repository: CLAUDE.md and README.md
+- **DO NOT** create documentation files for changes, summaries, troubleshooting, or any other purpose
+- **UPDATE** CLAUDE.md directly if important architectural information needs to be preserved
+- **MAINTAIN** context through this file only, not through additional documentation files
+
 ## Project Overview
 
 This is a Telegram bot built with Kotlin and Spring Boot that integrates with Claude API. Users send messages via Telegram, which are forwarded to Claude API, and the AI-generated responses are sent back to the user.
