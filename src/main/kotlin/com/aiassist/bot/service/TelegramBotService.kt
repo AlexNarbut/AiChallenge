@@ -60,31 +60,31 @@ class TelegramBotService(
 
                 val welcomeMessage = if (testResult) {
                     """
-                    👋 Welcome to AI Assistant Bot!
+                    👋 Добро пожаловать в AI Assistant Bot!
 
-                    I'm powered by Claude AI. Just send me a message and I'll respond!
+                    Я работаю на базе Claude AI. Просто отправьте мне сообщение, и я отвечу!
 
-                    Commands:
-                    /start - Initialize bot and verify connection
-                    /expert - Talk with fitness trainer expert
-                    /reasoning - Solve logical problems with specialized reasoning
-                    /normal - Switch back to normal mode
-                    /clear - Clear conversation history
+                    Команды:
+                    /start - Инициализация бота и проверка соединения
+                    /expert - Беседа с экспертом-фитнес тренером
+                    /reasoning - Решение логических задач со специализированными режимами
+                    /normal - Вернуться в обычный режим
+                    /clear - Очистить историю разговора
 
-                    ✅ Claude API connection verified successfully!
+                    ✅ Соединение с Claude API успешно проверено!
                     """.trimIndent()
                 } else {
                     """
-                    👋 Welcome to AI Assistant Bot!
+                    👋 Добро пожаловать в AI Assistant Bot!
 
-                    Commands:
-                    /start - Initialize bot and verify connection
-                    /expert - Talk with fitness trainer expert
-                    /reasoning - Solve logical problems with specialized reasoning
-                    /normal - Switch back to normal mode
-                    /clear - Clear conversation history
+                    Команды:
+                    /start - Инициализация бота и проверка соединения
+                    /expert - Беседа с экспертом-фитнес тренером
+                    /reasoning - Решение логических задач со специализированными режимами
+                    /normal - Вернуться в обычный режим
+                    /clear - Очистить историю разговора
 
-                    ❌ Warning: Failed to connect to Claude API. Please check your configuration.
+                    ❌ Внимание: Не удалось подключиться к Claude API. Проверьте конфигурацию.
                     """.trimIndent()
                 }
 
@@ -98,7 +98,7 @@ class TelegramBotService(
 
                 conversationHistory.remove(userId)
 
-                val clearMessage = "🧹 Conversation history cleared! Starting fresh."
+                val clearMessage = "🧹 История разговора очищена! Начинаем с чистого листа."
                 bot.sendMessage(chatId, clearMessage)
                 logger.info { "Cleared conversation history for user ${message.from?.username}" }
             }
@@ -111,13 +111,13 @@ class TelegramBotService(
                 conversationHistory.remove(userId) // Clear history when switching modes
 
                 val expertMessage = """
-                    👨‍⚕️ Expert Mode Activated!
+                    👨‍⚕️ Режим эксперта активирован!
 
-                    You are now talking with a fitness trainer expert. The expert will guide you through creating a personalized training program.
+                    Теперь вы общаетесь с экспертом-фитнес тренером. Эксперт поможет вам создать персональную программу тренировок.
 
-                    Commands:
-                    /normal - Switch back to normal mode
-                    /clear - Clear conversation and restart
+                    Команды:
+                    /normal - Вернуться в обычный режим
+                    /clear - Очистить разговор и начать заново
                 """.trimIndent()
 
                 bot.sendMessage(chatId, expertMessage)
@@ -133,14 +133,14 @@ class TelegramBotService(
                 conversationHistory.remove(userId) // Clear history when switching modes
 
                 val normalMessage = """
-                    💬 Normal Mode Activated!
+                    💬 Обычный режим активирован!
 
-                    You are now in normal conversation mode with Claude AI.
+                    Теперь вы в обычном режиме разговора с Claude AI.
 
-                    Commands:
-                    /expert - Switch to expert mode
-                    /reasoning - Enter reasoning mode
-                    /clear - Clear conversation history
+                    Команды:
+                    /expert - Переключиться в режим эксперта
+                    /reasoning - Войти в режим рассуждений
+                    /clear - Очистить историю разговора
                 """.trimIndent()
 
                 bot.sendMessage(chatId, normalMessage)
