@@ -33,6 +33,8 @@ class ResponseParser {
      */
     private fun parseJsonResponse(response: String): String {
         return try {
+            logger.debug { "Parsing JSON response of length: ${response.length}" }
+
             // Strip markdown code blocks if present
             val cleanedResponse = response
                 .trim()
@@ -40,6 +42,8 @@ class ResponseParser {
                 .removePrefix("```")
                 .removeSuffix("```")
                 .trim()
+
+            logger.debug { "Cleaned response length: ${cleanedResponse.length}, first 100 chars: ${cleanedResponse.take(100)}" }
 
             val jsonNode = objectMapper.readTree(cleanedResponse)
 
@@ -70,8 +74,16 @@ class ResponseParser {
                 }
             }.trim()
         } catch (e: Exception) {
-            logger.error(e) { "Failed to parse JSON response" }
-            "❌ Failed to parse JSON response. Raw response:\n$response"
+            logger.error(e) { "Failed to parse JSON response. Length: ${response.length}" }
+
+            // Show truncated response if too long
+            val preview = if (response.length > 500) {
+                "${response.take(250)}\n\n... (${response.length - 500} characters omitted) ...\n\n${response.takeLast(250)}"
+            } else {
+                response
+            }
+
+            "❌ Failed to parse JSON response.\n\nError: ${e.message}\n\nRaw response preview:\n```\n$preview\n```"
         }
     }
 
@@ -122,8 +134,16 @@ class ResponseParser {
                 }
             }.trim()
         } catch (e: Exception) {
-            logger.error(e) { "Failed to parse XML response" }
-            "❌ Failed to parse XML response. Raw response:\n$response"
+            logger.error(e) { "Failed to parse XML response. Length: ${response.length}" }
+
+            // Show truncated response if too long
+            val preview = if (response.length > 500) {
+                "${response.take(250)}\n\n... (${response.length - 500} characters omitted) ...\n\n${response.takeLast(250)}"
+            } else {
+                response
+            }
+
+            "❌ Failed to parse XML response.\n\nError: ${e.message}\n\nRaw response preview:\n```\n$preview\n```"
         }
     }
 

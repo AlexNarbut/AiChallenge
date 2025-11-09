@@ -17,5 +17,11 @@ data class ClaudeApiConfig(
     var apiUrl: String = "",
     var version: String = "",
     var responseFormat: String = "text", // Options: "text", "json", "xml"
-    var expertPrompt: String = "expert_system_prompt" // Filename without .txt extension
+    var expertPrompt: String = "expert_system_prompt", // Filename without .txt extension
+    var reasoningPrompts: Map<String, String> = mapOf(
+        "basic" to "reasoning_quick_answer_system_prompt",
+        "mathematical" to "reasoning_step_by_step_system_prompt",
+        "strategic" to "reasoning_prompt_engineer_system_prompt",
+        "creative" to "reasoning_expert_panel_system_prompt"
+    ) // Reasoning mode prompts - filenames without .txt extension
 )

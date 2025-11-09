@@ -10,6 +10,7 @@ import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.*
 import io.ktor.http.*
 import io.ktor.serialization.jackson.*
@@ -31,27 +32,52 @@ class ClaudeApiClient(
         install(Logging) {
             level = LogLevel.INFO
         }
+        install(HttpTimeout) {
+            requestTimeoutMillis = 300000 // 5 minutes
+            connectTimeoutMillis = 60000  // 1 minute
+            socketTimeoutMillis = 300000  // 5 minutes
+        }
     }
 
-    suspend fun sendMessage(userMessage: String, isExpertMode: Boolean = false): String {
-        return sendMessageWithHistory(userMessage, mutableListOf(), isExpertMode)
+    suspend fun sendMessage(userMessage: String, isExpertMode: Boolean = false, reasoningType: String? = null): String {
+        return sendMessageWithHistory(userMessage, mutableListOf(), isExpertMode, reasoningType)
     }
 
-    suspend fun sendMessageWithHistory(userMessage: String, history: MutableList<Message>, isExpertMode: Boolean = false): String {
+    suspend fun sendMessageWithHistory(
+        userMessage: String,
+        history: MutableList<Message>,
+        isExpertMode: Boolean = false,
+        reasoningType: String? = null
+    ): String {
         return try {
-            logger.info { "Sending message to Claude API with ${history.size} previous messages, format: ${config.responseFormat}, expert mode: $isExpertMode" }
+            logger.info { "Sending message to Claude API with ${history.size} previous messages, format: ${config.responseFormat}, expert mode: $isExpertMode, reasoning type: $reasoningType" }
 
-            // Determine system prompt based on expert mode and response format
-            val systemPrompt = if (isExpertMode) {
-                // In expert mode, use expert prompt
-                formatPromptLoader.getPromptForFormat("expert") ?: ""
+            // Determine system prompt: mode-specific prompt + format requirements
+            val modePrompt = when {
+                // Priority 1: Reasoning mode
+                reasoningType != null -> {
+                    formatPromptLoader.getPromptForFormat("reasoning_$reasoningType") ?: ""
+                }
+                // Priority 2: Expert mode
+                isExpertMode -> {
+                    formatPromptLoader.getPromptForFormat("expert") ?: ""
+                }
+                // Priority 3: Normal mode - no mode-specific prompt
+                else -> ""
+            }
+
+            // Add format requirements (JSON/XML) if configured
+            val formatPrompt = when (config.responseFormat.lowercase()) {
+                "json" -> formatPromptLoader.getPromptForFormat("json") ?: ""
+                "xml" -> formatPromptLoader.getPromptForFormat("xml") ?: ""
+                else -> ""
+            }
+
+            // Combine mode prompt with format prompt
+            val systemPrompt = if (modePrompt.isNotEmpty() && formatPrompt.isNotEmpty()) {
+                "$formatPrompt\n\n$modePrompt"
             } else {
-                // In normal mode, use format-specific prompt
-                when (config.responseFormat.lowercase()) {
-                    "json" -> formatPromptLoader.getPromptForFormat("json")
-                    "xml" -> formatPromptLoader.getPromptForFormat("xml")
-                    else -> ""
-                } ?: ""
+                formatPrompt + modePrompt
             }
 
             // Add user message to history
@@ -75,20 +101,20 @@ class ClaudeApiClient(
                 val response: ClaudeResponse = httpResponse.body()
                 logger.info { "Received response from Claude API. Tokens used: ${response.usage.inputTokens + response.usage.outputTokens}" }
 
-                val assistantMessage = response.content.firstOrNull()?.text ?: "No response from Claude API"
+                // Combine all content blocks into one message
+                val assistantMessage = response.content
+                    .filter { it.type == "text" }
+                    .joinToString("") { it.text }
+                    .takeIf { it.isNotEmpty() } ?: "No response from Claude API"
 
                 // Log the full raw response from Claude
-                logger.info { "Raw Claude response:\n$assistantMessage" }
+                logger.info { "Raw Claude response (${response.content.size} blocks):\n$assistantMessage" }
 
                 // Add assistant response to history
                 history.add(Message(role = "assistant", content = assistantMessage))
 
-                // Parse response based on format (skip parsing in expert mode)
-                val parsedMessage = if (isExpertMode) {
-                    assistantMessage // Return raw response in expert mode
-                } else {
-                    responseParser.parseResponse(assistantMessage, config.responseFormat)
-                }
+                // Parse response based on configured format (always applied)
+                val parsedMessage = responseParser.parseResponse(assistantMessage, config.responseFormat)
 
                 // Log the parsed response
                 logger.info { "Parsed response:\n$parsedMessage" }
@@ -96,12 +122,14 @@ class ClaudeApiClient(
                 parsedMessage
             } else {
                 val errorResponse: ClaudeErrorResponse = httpResponse.body()
-                logger.error { "Claude API error: ${errorResponse.error.type} - ${errorResponse.error.message}" }
+                val errorType = errorResponse.error?.type ?: "unknown"
+                val errorMessage = errorResponse.error?.message ?: "No error message"
+                logger.error { "Claude API error: $errorType - $errorMessage" }
 
                 // Remove the user message from history on error
                 history.removeLastOrNull()
 
-                "Sorry, Claude API returned an error: ${errorResponse.error.message}"
+                "Sorry, Claude API returned an error: $errorMessage"
             }
         } catch (e: Exception) {
             logger.error(e) { "Error calling Claude API" }

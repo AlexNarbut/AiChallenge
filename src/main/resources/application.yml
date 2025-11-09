@@ -15,7 +15,7 @@ claude:
   api:
     key: ${CLAUDE_API_KEY:your-claude-api-key}
     model: ${CLAUDE_MODEL:claude-haiku-4-5-20251001}
-    max-tokens: ${CLAUDE_MAX_TOKENS:1024}
+    max-tokens: ${CLAUDE_MAX_TOKENS:8000}
     api-url: ${CLAUDE_API_URL:https://api.anthropic.com/v1/messages}
     version: ${CLAUDE_API_VERSION:2023-06-01}
     response-format: ${CLAUDE_RESPONSE_FORMAT:text}

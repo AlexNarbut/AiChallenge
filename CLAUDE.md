@@ -163,11 +163,19 @@ The bot supports structured response formats (JSON and XML) in addition to plain
 
 **How it works:**
 1. Configure response format via `CLAUDE_RESPONSE_FORMAT` environment variable (text/json/xml)
-2. The appropriate system prompt is loaded from the format requirements file
-3. System prompt is sent as a top-level `system` parameter in the Claude API request
+2. Format prompt is loaded and combined with mode-specific prompt (if any)
+3. Combined system prompt is sent as a top-level `system` parameter in the Claude API request
 4. Claude API receives the system parameter along with the messages array and responds in the specified format
 5. ResponseParser parses the structured response and formats it for the user
 6. User receives a nicely formatted message with the extracted information
+
+**Integration with modes:**
+Response format is ALWAYS applied, regardless of the bot mode:
+- **Normal mode** → format prompt only
+- **Expert mode** → expert prompt + format prompt
+- **Reasoning mode** → reasoning prompt + format prompt
+
+The prompts are combined with `\n\n` separator when both are present.
 
 **Example - JSON format:**
 ```bash
@@ -180,8 +188,8 @@ CLAUDE_RESPONSE_FORMAT=xml ./gradlew bootRun
 ```
 
 **Format requirement files:**
-- `src/main/resources/json_format_requirements.txt`: Instructions for JSON responses
-- `src/main/resources/xml_format_requirements.txt`: Instructions for XML responses
+- `src/main/resources/dataFormat/json_format_requirements.txt`: Instructions for JSON responses
+- `src/main/resources/dataFormat/xml_format_requirements.txt`: Instructions for XML responses
 
 **Customizing format prompts:**
 Edit the format requirement files to modify the structure or add/remove fields. The ResponseParser expects the following fields:
@@ -213,25 +221,19 @@ The bot supports specialized expert modes where Claude takes on specific persona
 5. User sends `/normal` to exit expert mode
 
 **Expert Prompt File:**
-- `src/main/resources/expert_system_prompt.txt` - Contains the fitness trainer persona with survey protocol and plan generation instructions
+- `src/main/resources/systemPrompts/expert_system_prompt.txt` - Contains the fitness trainer persona with survey protocol and plan generation instructions
 
 **Adding New Expert Modes:**
-1. Create a new system prompt file in `src/main/resources/`
+1. Create a new system prompt file in `src/main/resources/systemPrompts/`
 2. Update `ClaudeApiConfig.expertPrompt` to reference the new file
 3. Modify `FormatPromptLoader` to load additional expert prompts
 4. Add command handlers in `TelegramBotService` to switch between expert types
 
 **Note:** Expert mode and response format features are independent. Expert mode uses its own system prompt and bypasses response parsing.
 
-## Long Response Handling (PDF Generation)
+## Long Response Handling (Message Splitting)
 
-When responses exceed a configurable length threshold, the bot automatically generates and sends a PDF document.
-
-**PdfGenerator** (`service/PdfGenerator.kt`):
-- Uses iText7 library to generate PDF documents
-- Creates formatted PDFs with title, timestamp, and content
-- Supports both file and byte array output
-- Automatically cleans up temporary files
+When responses exceed Telegram's message length limit, the bot automatically splits them into multiple sequential messages.
 
 **Configuration** (`config/BotConfiguration.kt`):
 - `maxMessageLength` in `TelegramBotConfig` (default: 4000 characters)
@@ -240,15 +242,96 @@ When responses exceed a configurable length threshold, the bot automatically gen
 **How it works:**
 1. Bot receives response from Claude API
 2. Checks if response length exceeds `maxMessageLength`
-3. If yes: generates PDF with appropriate title based on mode
-4. Sends PDF as document via Telegram
-5. Cleans up temporary file
-6. If PDF generation fails: sends truncated text as fallback
+3. If yes: intelligently splits response into chunks
+4. Sends chunks sequentially with part numbers (e.g., "Part 1/3")
+5. Small delay (100ms) between messages to avoid rate limits
 
-**Implementation** (`TelegramBotService.kt:167-198`):
-- Automatic length detection
-- Mode-aware PDF titles (e.g., "Fitness Training Plan" for expert mode)
-- Error handling with fallback to truncated text
-- Proper resource cleanup
+**Smart Splitting Algorithm** (`TelegramBotService.kt:308-360`):
+- **Priority 1:** Break at newline character `\n` (preserves structure)
+- **Priority 2:** Break at space (keeps words intact)
+- **Priority 3:** Hard break at max length (only if no better option)
+- Minimum break position: 50% of maxMessageLength (avoids tiny chunks)
 
-This feature is especially useful for expert mode responses like detailed training plans that often exceed Telegram's message limits.
+**Example output:**
+```
+📝 Part 1/3
+
+[First part of the response...]
+
+📝 Part 2/3
+
+[Second part of the response...]
+
+📝 Part 3/3
+
+[Final part of the response...]
+```
+
+**Advantages:**
+- User can read directly in chat (no file downloads)
+- Easy to copy specific parts
+- Works perfectly on mobile devices
+- Maintains chat history
+- Numbered parts for easy navigation
+
+This feature is especially useful for reasoning mode responses (Step by Step, Expert Panel) that often contain detailed explanations.
+
+## Reasoning Mode Feature
+
+The bot supports specialized reasoning modes for solving different types of logical problems with tailored AI personas.
+
+**Architecture:**
+
+The reasoning system has 4 specialized sub-modes, each with its own system prompt and approach:
+
+1. **Basic Reasoning** (`/reasoning_basic`) - Fundamental logical reasoning and step-by-step problem solving
+2. **Mathematical Reasoning** (`/reasoning_math`) - Mathematical, analytical, and quantitative problem solving
+3. **Strategic Reasoning** (`/reasoning_strategic`) - Strategic planning, decision-making, and scenario analysis
+4. **Creative Reasoning** (`/reasoning_creative`) - Creative problem solving and innovative thinking
+
+**Key Components:**
+
+**Reasoning Mode Tracking** (`TelegramBotService.kt`):
+- Maintains a ConcurrentHashMap tracking active reasoning mode per user
+- Each user can be in one reasoning sub-mode at a time
+- History is cleared when switching between modes
+
+**Commands:**
+- `/reasoning` - Opens reasoning mode menu with all available sub-modes
+- `/quick_answer` - Quick direct answers mode
+- `/step_by_step` - Step-by-step solution mode
+- `/prompt_engineer` - Prompt generation mode
+- `/expert_panel` - Expert panel discussion mode
+- `/normal` - Exit reasoning mode and return to normal conversation
+
+**How it works:**
+1. User sends `/reasoning` command to see available sub-modes
+2. User selects a specific reasoning mode (e.g., `/step_by_step`)
+3. Bot sets reasoning mode flag for that user and clears history
+4. All subsequent messages use the specific reasoning system prompt
+5. Reasoning prompts are loaded from dedicated files in `src/main/resources/`
+6. User sends `/normal` or `/reasoning` to exit or switch modes
+
+**System Prompt Files:**
+- `src/main/resources/systemPrompts/reasoning_quick_answer_system_prompt.txt` - Quick direct answers
+- `src/main/resources/systemPrompts/reasoning_step_by_step_system_prompt.txt` - Step-by-step solutions
+- `src/main/resources/systemPrompts/reasoning_prompt_engineer_system_prompt.txt` - Prompt generation for LLMs
+- `src/main/resources/systemPrompts/reasoning_expert_panel_system_prompt.txt` - Expert panel discussions
+
+**Configuration** (`config/BotConfiguration.kt`):
+- `reasoningPrompts` map in `ClaudeApiConfig` defines filename mappings
+- Default mappings can be overridden in `application.yml`
+
+**Customizing Reasoning Prompts:**
+1. Edit the corresponding `.txt` file in `src/main/resources/systemPrompts/`
+2. Define the persona, approach, and capabilities
+3. Specify problem-solving frameworks and techniques
+4. The prompt is loaded automatically on application startup
+
+**Mode Priority** (`ClaudeApiClient.kt:50-67`):
+When determining which system prompt to use, the bot follows this priority:
+1. Reasoning mode (if active)
+2. Expert mode (if active)
+3. Response format mode (normal operation)
+
+**Note:** Reasoning mode, like expert mode, returns raw responses without format parsing. This allows for flexible, conversational problem-solving.

@@ -1,0 +1,27 @@
+CRITICAL! Respond with ONLY raw XML. First character MUST be <, last MUST be >.
+Don't add any text before or after the XML.
+
+REQUIRED STRUCTURE:
+<?xml version="1.0" encoding="UTF-8"?>
+<response>
+  <question>user's question</question>
+  <answer>your detailed response</answer>
+  <urls>
+    <url>url1</url>
+    <url>url2</url>
+  </urls>
+  <date>2025-11-05T12:00:00Z</date>
+</response>
+
+IMPORTANT: Your response MUST be complete valid XML even if answer is very long.
+Always close all tags properly. If response is cut due to length limits,
+finish with valid XML by closing the current tag and adding remaining required tags.
+
+RULES:
+- NO ```xml wrapper
+- NO markdown or text before/after
+- Properly close all tags
+- Escape: &lt; &gt; &amp; &quot; &apos;
+- Use CDATA for special chars: <![CDATA[...]]>
+- urls: empty <urls/> if none
+- date: ISO 8601 format

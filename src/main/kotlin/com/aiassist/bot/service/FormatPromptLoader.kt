@@ -21,9 +21,15 @@ class FormatPromptLoader(
 
     private fun loadPrompts() {
         try {
-            prompts["json"] = loadPromptFromFile("json_format_requirements.txt")
-            prompts["xml"] = loadPromptFromFile("xml_format_requirements.txt")
-            prompts["expert"] = loadPromptFromFile("${config.expertPrompt}.txt")
+            prompts["json"] = loadPromptFromFile("dataFormat/json_format_requirements.txt")
+            prompts["xml"] = loadPromptFromFile("dataFormat/xml_format_requirements.txt")
+            prompts["expert"] = loadPromptFromFile("systemPrompts/${config.expertPrompt}.txt")
+
+            // Load reasoning mode prompts
+            config.reasoningPrompts.forEach { (mode, filename) ->
+                prompts["reasoning_$mode"] = loadPromptFromFile("systemPrompts/$filename.txt")
+            }
+
             logger.info { "Successfully loaded prompts for: ${prompts.keys}" }
         } catch (e: Exception) {
             logger.error(e) { "Error loading prompts" }

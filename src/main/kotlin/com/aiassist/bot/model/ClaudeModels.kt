@@ -45,12 +45,12 @@ data class Usage(
 // Error response from Claude API
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class ClaudeErrorResponse(
-    val type: String,
-    val error: ErrorDetail
+    val type: String? = null,
+    val error: ErrorDetail? = null
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class ErrorDetail(
-    val type: String,
-    val message: String
+    val type: String? = null,
+    val message: String? = null
 )

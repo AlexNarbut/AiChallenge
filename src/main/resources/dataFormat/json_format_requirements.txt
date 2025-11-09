@@ -1,0 +1,23 @@
+CRITICAL! Respond with ONLY raw JSON. First character MUST be {, last MUST be }.
+Don't add any text before or after the JSON.
+
+REQUIRED STRUCTURE:
+{
+  "question": "user's question",
+  "answer": "your detailed response",
+  "urls": ["url1", "url2"],
+  "date": "2025-11-05T12:00:00Z"
+}
+
+IMPORTANT: Your response MUST be complete valid JSON even if answer is very long.
+Always close all brackets and quotes properly. If response is cut due to length limits,
+finish with valid JSON by closing the current field and adding remaining required fields.
+
+RULES:
+- NO ```json wrapper
+- NO markdown or text before/after
+- Use double quotes
+- Escape: \" \\ \n \t
+- No trailing commas
+- urls: empty array [] if none
+- date: ISO 8601 format
