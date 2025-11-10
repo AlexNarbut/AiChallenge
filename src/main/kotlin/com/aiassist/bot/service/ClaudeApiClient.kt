@@ -23,7 +23,8 @@ private val logger = KotlinLogging.logger {}
 class ClaudeApiClient(
     private val config: ClaudeApiConfig,
     private val formatPromptLoader: FormatPromptLoader,
-    private val responseParser: ResponseParser
+    private val responseParser: ResponseParser,
+    private val settingsManager: SettingsManager
 ) {
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
@@ -39,13 +40,19 @@ class ClaudeApiClient(
         }
     }
 
-    suspend fun sendMessage(userMessage: String, isExpertMode: Boolean = false, reasoningType: String? = null): String {
-        return sendMessageWithHistory(userMessage, mutableListOf(), isExpertMode, reasoningType)
+    suspend fun sendMessage(
+        userMessage: String,
+        chatId: Long,
+        isExpertMode: Boolean = false,
+        reasoningType: String? = null
+    ): String {
+        return sendMessageWithHistory(userMessage, mutableListOf(), chatId, isExpertMode, reasoningType)
     }
 
     suspend fun sendMessageWithHistory(
         userMessage: String,
         history: MutableList<Message>,
+        chatId: Long,
         isExpertMode: Boolean = false,
         reasoningType: String? = null
     ): String {
@@ -83,11 +90,16 @@ class ClaudeApiClient(
             // Add user message to history
             history.add(Message(role = "user", content = userMessage))
 
+            // Get user's temperature setting
+            val temperature = settingsManager.getTemperature(chatId)
+            logger.info { "Using temperature: $temperature for chatId: $chatId" }
+
             val request = ClaudeRequest(
                 model = config.model,
                 maxTokens = config.maxTokens,
                 messages = history.toList(),
-                system = systemPrompt
+                system = systemPrompt,
+                temperature = temperature
             )
 
             val httpResponse = client.post(config.apiUrl) {

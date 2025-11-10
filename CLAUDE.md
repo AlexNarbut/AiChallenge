@@ -344,3 +344,56 @@ When determining which system prompt to use, the bot follows this priority:
 3. Response format mode (normal operation)
 
 **Note:** Reasoning mode, like expert mode, returns raw responses without format parsing. This allows for flexible, conversational problem-solving.
+
+## Temperature Settings Feature
+
+The bot supports user-configurable temperature settings for Claude API, allowing users to control the creativity and randomness of responses.
+
+**Key Components:**
+
+**SettingsManager** (`service/SettingsManager.kt`):
+- Service for managing user-specific settings
+- Maintains a ConcurrentHashMap tracking temperature per user
+- Provides three preset temperature options: PRECISE (0.0), BALANCED (0.5), CREATIVE (1.0)
+- Default temperature is 1.0 (Creative)
+
+**Temperature Parameter:**
+- Added to `ClaudeRequest` model (`model/ClaudeModels.kt`)
+- Sent to Claude API with each request
+- Range: 0.0 to 1.0
+
+**Commands:**
+- `/settings` - Opens settings menu with current temperature and available options
+- `/temp_0` - Set temperature to 0.0 (Precise mode)
+- `/temp_05` - Set temperature to 0.5 (Balanced mode)
+- `/temp_1` - Set temperature to 1.0 (Creative mode)
+
+**How it works:**
+1. User sends `/settings` command to see current temperature and available options
+2. User selects desired temperature option (e.g., `/temp_0`)
+3. SettingsManager stores the temperature setting for that user
+4. All subsequent API requests use the user's temperature setting
+5. Temperature persists across conversations until changed
+
+**Temperature Options:**
+
+1. **Precise (0.0)** - 🎯
+   - Maximally deterministic and consistent responses
+   - Ideal for factual questions and technical tasks
+   - Claude will give the most likely/expected response
+
+2. **Balanced (0.5)** - ⚖️
+   - Balance between creativity and precision
+   - Suitable for most general tasks
+   - Good default for varied conversations
+
+3. **Creative (1.0)** - 🎨
+   - More creative and diverse responses
+   - Good for brainstorming and creative tasks
+   - Produces more varied and imaginative outputs
+
+**Implementation Details:**
+- Temperature is applied per-user and stored in memory
+- Settings survive across different bot modes (normal, expert, reasoning)
+- ClaudeApiClient retrieves user's temperature from SettingsManager before each request
+- Temperature is logged for debugging purposes

@@ -20,7 +20,8 @@ private val logger = KotlinLogging.logger {}
 class TelegramBotService(
     private val config: TelegramBotConfig,
     private val claudeApiClient: ClaudeApiClient,
-    private val pdfGenerator: PdfGenerator
+    private val pdfGenerator: PdfGenerator,
+    private val settingsManager: SettingsManager
 ) {
     // Store conversation history per chat
     private val conversationHistory = ConcurrentHashMap<Long, MutableList<Message>>()
@@ -50,7 +51,7 @@ class TelegramBotService(
                 val testResult = runBlocking {
                     try {
                         // Send a simple test message to verify API connectivity
-                        claudeApiClient.sendMessage("Hello")
+                        claudeApiClient.sendMessage("Hello", userId)
                         true
                     } catch (e: Exception) {
                         logger.error(e) { "Failed to initialize Claude API client" }
@@ -69,6 +70,7 @@ class TelegramBotService(
                     /expert - Беседа с экспертом-фитнес тренером
                     /reasoning - Решение логических задач со специализированными режимами
                     /normal - Вернуться в обычный режим
+                    /settings - ⚙️ Настройки (температура модели)
                     /clear - Очистить историю разговора
 
                     ✅ Соединение с Claude API успешно проверено!
@@ -82,6 +84,7 @@ class TelegramBotService(
                     /expert - Беседа с экспертом-фитнес тренером
                     /reasoning - Решение логических задач со специализированными режимами
                     /normal - Вернуться в обычный режим
+                    /settings - ⚙️ Настройки (температура модели)
                     /clear - Очистить историю разговора
 
                     ❌ Внимание: Не удалось подключиться к Claude API. Проверьте конфигурацию.
@@ -170,6 +173,83 @@ class TelegramBotService(
 
                 bot.sendMessage(chatId, reasoningMessage)
                 logger.info { "Opened reasoning mode menu for user ${message.from?.username}" }
+            }
+
+            command("settings") {
+                val chatId = ChatId.fromId(message.chat.id)
+                val userId = message.chat.id
+
+                val currentTemp = settingsManager.getTemperature(userId)
+                val currentOption = settingsManager.getTemperatureOption(currentTemp)
+                val currentTempStr = currentOption?.let { "Текущая: ${it.name} (${it.value})" } ?: "Текущая: $currentTemp"
+
+                val settingsMessage = """
+                    ⚙️ Настройки
+
+                    $currentTempStr
+
+                    Выберите температуру модели:
+
+                    /temp_0 - 🎯 Точная (0.0)
+                    Максимально точные и предсказуемые ответы. Идеально для фактических вопросов и технических задач.
+
+                    /temp_05 - ⚖️ Сбалансированная (0.5)
+                    Баланс между креативностью и точностью. Подходит для большинства задач.
+
+                    /temp_1 - 🎨 Креативная (1.0)
+                    Более креативные и разнообразные ответы. Хорошо для brainstorming и творческих задач.
+                """.trimIndent()
+
+                bot.sendMessage(chatId, settingsMessage)
+                logger.info { "Opened settings menu for user ${message.from?.username}" }
+            }
+
+            command("temp_0") {
+                val chatId = ChatId.fromId(message.chat.id)
+                val userId = message.chat.id
+
+                settingsManager.setTemperature(userId, 0.0)
+
+                val confirmMessage = """
+                    ✅ Температура установлена: Точная (0.0)
+
+                    Теперь ответы будут максимально точными и предсказуемыми.
+                """.trimIndent()
+
+                bot.sendMessage(chatId, confirmMessage)
+                logger.info { "Set temperature to 0.0 for user ${message.from?.username}" }
+            }
+
+            command("temp_05") {
+                val chatId = ChatId.fromId(message.chat.id)
+                val userId = message.chat.id
+
+                settingsManager.setTemperature(userId, 0.5)
+
+                val confirmMessage = """
+                    ✅ Температура установлена: Сбалансированная (0.5)
+
+                    Теперь ответы будут сбалансированы между креативностью и точностью.
+                """.trimIndent()
+
+                bot.sendMessage(chatId, confirmMessage)
+                logger.info { "Set temperature to 0.5 for user ${message.from?.username}" }
+            }
+
+            command("temp_1") {
+                val chatId = ChatId.fromId(message.chat.id)
+                val userId = message.chat.id
+
+                settingsManager.setTemperature(userId, 1.0)
+
+                val confirmMessage = """
+                    ✅ Температура установлена: Креативная (1.0)
+
+                    Теперь ответы будут более креативными и разнообразными.
+                """.trimIndent()
+
+                bot.sendMessage(chatId, confirmMessage)
+                logger.info { "Set temperature to 1.0 for user ${message.from?.username}" }
             }
 
             command("quick_answer") {
@@ -299,7 +379,7 @@ class TelegramBotService(
 
                 // Get response from Claude API with conversation history
                 val response = runBlocking {
-                    claudeApiClient.sendMessageWithHistory(userMessage, history, isExpertMode, reasoningType)
+                    claudeApiClient.sendMessageWithHistory(userMessage, history, userId, isExpertMode, reasoningType)
                 }
 
                 logger.info { "Response length: ${response.length} characters" }
