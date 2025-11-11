@@ -55,3 +55,13 @@ data class ErrorDetail(
     val type: String? = null,
     val message: String? = null
 )
+
+// Response with metrics
+data class ClaudeResponseWithMetrics(
+    val message: String,
+    val inputTokens: Int,
+    val outputTokens: Int,
+    val responseTimeMs: Long,
+    val cost: Double,
+    val modelUsed: String
+)

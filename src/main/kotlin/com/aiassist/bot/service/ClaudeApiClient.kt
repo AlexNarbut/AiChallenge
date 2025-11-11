@@ -4,6 +4,7 @@ import com.aiassist.bot.config.ClaudeApiConfig
 import com.aiassist.bot.model.ClaudeRequest
 import com.aiassist.bot.model.ClaudeResponse
 import com.aiassist.bot.model.ClaudeErrorResponse
+import com.aiassist.bot.model.ClaudeResponseWithMetrics
 import com.aiassist.bot.model.Message
 import io.ktor.client.*
 import io.ktor.client.call.*
@@ -45,7 +46,7 @@ class ClaudeApiClient(
         chatId: Long,
         isExpertMode: Boolean = false,
         reasoningType: String? = null
-    ): String {
+    ): ClaudeResponseWithMetrics {
         return sendMessageWithHistory(userMessage, mutableListOf(), chatId, isExpertMode, reasoningType)
     }
 
@@ -55,7 +56,8 @@ class ClaudeApiClient(
         chatId: Long,
         isExpertMode: Boolean = false,
         reasoningType: String? = null
-    ): String {
+    ): ClaudeResponseWithMetrics {
+        val startTime = System.currentTimeMillis()
         return try {
             logger.info { "Sending message to Claude API with ${history.size} previous messages, format: ${config.responseFormat}, expert mode: $isExpertMode, reasoning type: $reasoningType" }
 
@@ -94,8 +96,12 @@ class ClaudeApiClient(
             val temperature = settingsManager.getTemperature(chatId)
             logger.info { "Using temperature: $temperature for chatId: $chatId" }
 
+            // Get user's model selection
+            val selectedModel = settingsManager.getModel(chatId)
+            logger.info { "Using model: $selectedModel for chatId: $chatId" }
+
             val request = ClaudeRequest(
-                model = config.model,
+                model = selectedModel,
                 maxTokens = config.maxTokens,
                 messages = history.toList(),
                 system = systemPrompt,
@@ -111,6 +117,8 @@ class ClaudeApiClient(
 
             if (httpResponse.status.value in 200..299) {
                 val response: ClaudeResponse = httpResponse.body()
+                val responseTime = System.currentTimeMillis() - startTime
+
                 logger.info { "Received response from Claude API. Tokens used: ${response.usage.inputTokens + response.usage.outputTokens}" }
 
                 // Combine all content blocks into one message
@@ -131,25 +139,52 @@ class ClaudeApiClient(
                 // Log the parsed response
                 logger.info { "Parsed response:\n$parsedMessage" }
 
-                parsedMessage
+                // Calculate cost based on model used
+                val modelOption = settingsManager.getModelOption(selectedModel)
+                val cost = modelOption?.calculateCost(response.usage.inputTokens, response.usage.outputTokens) ?: 0.0
+
+                ClaudeResponseWithMetrics(
+                    message = parsedMessage,
+                    inputTokens = response.usage.inputTokens,
+                    outputTokens = response.usage.outputTokens,
+                    responseTimeMs = responseTime,
+                    cost = cost,
+                    modelUsed = response.model
+                )
             } else {
                 val errorResponse: ClaudeErrorResponse = httpResponse.body()
                 val errorType = errorResponse.error?.type ?: "unknown"
                 val errorMessage = errorResponse.error?.message ?: "No error message"
+                val responseTime = System.currentTimeMillis() - startTime
                 logger.error { "Claude API error: $errorType - $errorMessage" }
 
                 // Remove the user message from history on error
                 history.removeLastOrNull()
 
-                "Sorry, Claude API returned an error: $errorMessage"
+                ClaudeResponseWithMetrics(
+                    message = "Sorry, Claude API returned an error: $errorMessage",
+                    inputTokens = 0,
+                    outputTokens = 0,
+                    responseTimeMs = responseTime,
+                    cost = 0.0,
+                    modelUsed = settingsManager.getModel(chatId)
+                )
             }
         } catch (e: Exception) {
+            val responseTime = System.currentTimeMillis() - startTime
             logger.error(e) { "Error calling Claude API" }
 
             // Remove the user message from history on error
             history.removeLastOrNull()
 
-            "Sorry, I encountered an error processing your request: ${e.message}"
+            ClaudeResponseWithMetrics(
+                message = "Sorry, I encountered an error processing your request: ${e.message}",
+                inputTokens = 0,
+                outputTokens = 0,
+                responseTimeMs = responseTime,
+                cost = 0.0,
+                modelUsed = settingsManager.getModel(chatId)
+            )
         }
     }
 

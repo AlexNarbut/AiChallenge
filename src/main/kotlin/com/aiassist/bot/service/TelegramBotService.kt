@@ -70,8 +70,10 @@ class TelegramBotService(
                     /expert - Беседа с экспертом-фитнес тренером
                     /reasoning - Решение логических задач со специализированными режимами
                     /normal - Вернуться в обычный режим
-                    /settings - ⚙️ Настройки (температура модели)
+                    /settings - ⚙️ Настройки (модель, температура)
                     /clear - Очистить историю разговора
+
+                    📊 Каждый ответ содержит метрики: время, токены и стоимость!
 
                     ✅ Соединение с Claude API успешно проверено!
                     """.trimIndent()
@@ -84,7 +86,7 @@ class TelegramBotService(
                     /expert - Беседа с экспертом-фитнес тренером
                     /reasoning - Решение логических задач со специализированными режимами
                     /normal - Вернуться в обычный режим
-                    /settings - ⚙️ Настройки (температура модели)
+                    /settings - ⚙️ Настройки (модель, температура)
                     /clear - Очистить историю разговора
 
                     ❌ Внимание: Не удалось подключиться к Claude API. Проверьте конфигурацию.
@@ -183,21 +185,32 @@ class TelegramBotService(
                 val currentOption = settingsManager.getTemperatureOption(currentTemp)
                 val currentTempStr = currentOption?.let { "Текущая: ${it.name} (${it.value})" } ?: "Текущая: $currentTemp"
 
+                val currentModelId = settingsManager.getModel(userId)
+                val currentModel = settingsManager.getModelOption(currentModelId)
+                val currentModelStr = currentModel?.let { "${it.displayName}" } ?: "Unknown"
+
                 val settingsMessage = """
                     ⚙️ Настройки
 
-                    $currentTempStr
+                    🤖 Модель: $currentModelStr
+                    🌡️ Температура: $currentTempStr
 
-                    Выберите температуру модели:
+                    📊 Выбор модели:
+                    /model_opus - 💎 Opus 4.1
+                    Самая мощная модель для сложных задач ($15/$75 per MTok)
 
+                    /model_sonnet - ⭐ Sonnet 4.5 (рекомендуется)
+                    Лучший баланс качества и цены ($3/$15 per MTok)
+
+                    /model_haiku - ⚡ Haiku 4.5
+                    Быстрая и экономичная модель ($1/$5 per MTok)
+
+                    🌡️ Температура модели:
                     /temp_0 - 🎯 Точная (0.0)
-                    Максимально точные и предсказуемые ответы. Идеально для фактических вопросов и технических задач.
-
                     /temp_05 - ⚖️ Сбалансированная (0.5)
-                    Баланс между креативностью и точностью. Подходит для большинства задач.
-
                     /temp_1 - 🎨 Креативная (1.0)
-                    Более креативные и разнообразные ответы. Хорошо для brainstorming и творческих задач.
+
+                    ⚠️ При смене модели история чата будет очищена
                 """.trimIndent()
 
                 bot.sendMessage(chatId, settingsMessage)
@@ -250,6 +263,72 @@ class TelegramBotService(
 
                 bot.sendMessage(chatId, confirmMessage)
                 logger.info { "Set temperature to 1.0 for user ${message.from?.username}" }
+            }
+
+            command("model_opus") {
+                val chatId = ChatId.fromId(message.chat.id)
+                val userId = message.chat.id
+
+                settingsManager.setModel(userId, "claude-opus-4-1-20250805")
+                conversationHistory.remove(userId) // Clear history when changing model
+
+                val confirmMessage = """
+                    ✅ Модель установлена: Opus 4.1 💎
+
+                    Самая мощная модель Claude для сложных задач.
+                    • Цена: ${'$'}15/${'$'}75 per MTok (вход/выход)
+                    • Контекст: 200K токенов
+                    • Max output: 32K токенов
+
+                    🧹 История чата очищена
+                """.trimIndent()
+
+                bot.sendMessage(chatId, confirmMessage)
+                logger.info { "Set model to Opus 4.1 for user ${message.from?.username}" }
+            }
+
+            command("model_sonnet") {
+                val chatId = ChatId.fromId(message.chat.id)
+                val userId = message.chat.id
+
+                settingsManager.setModel(userId, "claude-sonnet-4-5-20250929")
+                conversationHistory.remove(userId) // Clear history when changing model
+
+                val confirmMessage = """
+                    ✅ Модель установлена: Sonnet 4.5 ⭐
+
+                    Лучший баланс качества и цены (рекомендуется).
+                    • Цена: ${'$'}3/${'$'}15 per MTok (вход/выход)
+                    • Контекст: 200K токенов
+                    • Max output: 64K токенов
+
+                    🧹 История чата очищена
+                """.trimIndent()
+
+                bot.sendMessage(chatId, confirmMessage)
+                logger.info { "Set model to Sonnet 4.5 for user ${message.from?.username}" }
+            }
+
+            command("model_haiku") {
+                val chatId = ChatId.fromId(message.chat.id)
+                val userId = message.chat.id
+
+                settingsManager.setModel(userId, "claude-haiku-4-5-20251001")
+                conversationHistory.remove(userId) // Clear history when changing model
+
+                val confirmMessage = """
+                    ✅ Модель установлена: Haiku 4.5 ⚡
+
+                    Быстрая и экономичная модель.
+                    • Цена: ${'$'}1/${'$'}5 per MTok (вход/выход)
+                    • Контекст: 200K токенов
+                    • Max output: 64K токенов
+
+                    🧹 История чата очищена
+                """.trimIndent()
+
+                bot.sendMessage(chatId, confirmMessage)
+                logger.info { "Set model to Haiku 4.5 for user ${message.from?.username}" }
             }
 
             command("quick_answer") {
@@ -378,14 +457,29 @@ class TelegramBotService(
                 val reasoningType = reasoningMode[userId]
 
                 // Get response from Claude API with conversation history
-                val response = runBlocking {
+                val responseWithMetrics = runBlocking {
                     claudeApiClient.sendMessageWithHistory(userMessage, history, userId, isExpertMode, reasoningType)
                 }
 
-                logger.info { "Response length: ${response.length} characters" }
+                val response = responseWithMetrics.message
+
+                // Format metrics footer
+                val metricsFooter = """
+
+
+                    📊 Метрики:
+                    ⏱️ Время: ${responseWithMetrics.responseTimeMs / 1000.0}s
+                    📥 Токены (вход): ${responseWithMetrics.inputTokens}
+                    📤 Токены (выход): ${responseWithMetrics.outputTokens}
+                    💰 Стоимость: ${"%.6f".format(responseWithMetrics.cost)}$
+                    🤖 Модель: ${settingsManager.getModelOption(responseWithMetrics.modelUsed)?.displayName ?: responseWithMetrics.modelUsed}
+                """.trimIndent()
+
+                logger.info { "Response length: ${response.length} characters, metrics: ${responseWithMetrics.outputTokens} tokens, ${responseWithMetrics.responseTimeMs}ms, cost: ${responseWithMetrics.cost}" }
 
                 // Check if response is too long for Telegram message
-                if (response.length > config.maxMessageLength) {
+                val fullMessage = response + metricsFooter
+                if (fullMessage.length > config.maxMessageLength) {
                     logger.info { "Response exceeds max length (${config.maxMessageLength}), splitting into multiple messages" }
 
                     // Split response into chunks
@@ -424,7 +518,15 @@ class TelegramBotService(
                     // Send all chunks
                     chunks.forEachIndexed { index, chunk ->
                         val partHeader = if (chunks.size > 1) "📝 Part ${index + 1}/${chunks.size}\n\n" else ""
-                        bot.sendMessage(chatId, partHeader + chunk)
+
+                        // Add metrics to the last chunk
+                        val messageToSend = if (index == chunks.size - 1) {
+                            partHeader + chunk + metricsFooter
+                        } else {
+                            partHeader + chunk
+                        }
+
+                        bot.sendMessage(chatId, messageToSend)
 
                         // Small delay between messages to avoid rate limits
                         if (index < chunks.size - 1) {
@@ -434,9 +536,9 @@ class TelegramBotService(
 
                     logger.info { "Sent ${chunks.size} message parts to user ${message.from?.username}" }
                 } else {
-                    // Send normal text message
-                    logger.info { "Sending response to user:\n$response" }
-                    bot.sendMessage(chatId, response)
+                    // Send normal text message with metrics
+                    logger.info { "Sending response to user:\n$fullMessage" }
+                    bot.sendMessage(chatId, fullMessage)
                 }
             }
         }
