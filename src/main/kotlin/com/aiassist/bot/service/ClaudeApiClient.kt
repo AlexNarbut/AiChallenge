@@ -100,9 +100,13 @@ class ClaudeApiClient(
             val selectedModel = settingsManager.getModel(chatId)
             logger.info { "Using model: $selectedModel for chatId: $chatId" }
 
+            // Get user's max tokens setting
+            val maxTokens = settingsManager.getMaxTokens(chatId)
+            logger.info { "Using max tokens: $maxTokens for chatId: $chatId" }
+
             val request = ClaudeRequest(
                 model = selectedModel,
-                maxTokens = config.maxTokens,
+                maxTokens = maxTokens,
                 messages = history.toList(),
                 system = systemPrompt,
                 temperature = temperature
@@ -133,8 +137,20 @@ class ClaudeApiClient(
                 // Add assistant response to history
                 history.add(Message(role = "assistant", content = assistantMessage))
 
-                // Parse response based on configured format (always applied)
-                val parsedMessage = responseParser.parseResponse(assistantMessage, config.responseFormat)
+                // Determine if we should parse structured formats
+                // For JSON/XML formats, require minimum tokens to avoid incomplete responses
+                val shouldParseStructuredFormat = when (config.responseFormat.lowercase()) {
+                    "json", "xml" -> maxTokens >= 1000 // Minimum 1000 tokens for structured formats
+                    else -> true
+                }
+
+                // Parse response based on configured format
+                val parsedMessage = if (shouldParseStructuredFormat) {
+                    responseParser.parseResponse(assistantMessage, config.responseFormat)
+                } else {
+                    logger.warn { "Skipping structured format parsing due to low token limit ($maxTokens). Minimum required: 1000" }
+                    assistantMessage // Return raw response
+                }
 
                 // Log the parsed response
                 logger.info { "Parsed response:\n$parsedMessage" }

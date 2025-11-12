@@ -189,11 +189,14 @@ class TelegramBotService(
                 val currentModel = settingsManager.getModelOption(currentModelId)
                 val currentModelStr = currentModel?.let { "${it.displayName}" } ?: "Unknown"
 
+                val currentMaxTokens = settingsManager.getMaxTokens(userId)
+
                 val settingsMessage = """
                     ⚙️ Настройки
 
                     🤖 Модель: $currentModelStr
                     🌡️ Температура: $currentTempStr
+                    🔢 Макс. токенов: $currentMaxTokens
 
                     📊 Выбор модели:
                     /model_opus - 💎 Opus 4.1
@@ -209,6 +212,11 @@ class TelegramBotService(
                     /temp_0 - 🎯 Точная (0.0)
                     /temp_05 - ⚖️ Сбалансированная (0.5)
                     /temp_1 - 🎨 Креативная (1.0)
+
+                    🔢 Настройка токенов:
+                    /set_tokens <число> - Установить макс. выходных токенов
+                    Диапазон: 1-10000 токенов
+                    Текущее значение: $currentMaxTokens
 
                     ⚠️ При смене модели история чата будет очищена
                 """.trimIndent()
@@ -329,6 +337,92 @@ class TelegramBotService(
 
                 bot.sendMessage(chatId, confirmMessage)
                 logger.info { "Set model to Haiku 4.5 for user ${message.from?.username}" }
+            }
+
+            command("set_tokens") {
+                val chatId = ChatId.fromId(message.chat.id)
+                val userId = message.chat.id
+                val args = message.text?.split(" ")?.drop(1) // Get arguments after command
+
+                if (args.isNullOrEmpty()) {
+                    val errorMessage = """
+                        ❌ Ошибка: Не указано значение
+
+                        Использование: /set_tokens <число>
+                        Пример: /set_tokens 2000
+
+                        Диапазон: 1-10000 токенов
+                        Текущее значение: ${settingsManager.getMaxTokens(userId)}
+                    """.trimIndent()
+
+                    bot.sendMessage(chatId, errorMessage)
+                    logger.warn { "User ${message.from?.username} tried to set tokens without value" }
+                    return@command
+                }
+
+                val tokenValue = args[0].toIntOrNull()
+
+                if (tokenValue == null) {
+                    val errorMessage = """
+                        ❌ Ошибка: Значение должно быть числом
+
+                        Использование: /set_tokens <число>
+                        Пример: /set_tokens 2000
+
+                        Диапазон: 1-10000 токенов
+                        Вы ввели: ${args[0]}
+                    """.trimIndent()
+
+                    bot.sendMessage(chatId, errorMessage)
+                    logger.warn { "User ${message.from?.username} tried to set tokens with non-numeric value: ${args[0]}" }
+                    return@command
+                }
+
+                if (!settingsManager.isValidTokenValue(tokenValue)) {
+                    val errorMessage = """
+                        ❌ Ошибка: Значение вне допустимого диапазона
+
+                        Допустимый диапазон: ${SettingsManager.MIN_TOKENS}-${SettingsManager.MAX_TOKENS} токенов
+                        Вы ввели: $tokenValue
+
+                        Попробуйте значение в пределах диапазона.
+                    """.trimIndent()
+
+                    bot.sendMessage(chatId, errorMessage)
+                    logger.warn { "User ${message.from?.username} tried to set tokens out of range: $tokenValue" }
+                    return@command
+                }
+
+                try {
+                    settingsManager.setMaxTokens(userId, tokenValue)
+
+                    // Add warning if token value is too low for JSON/XML formats
+                    val warningNote = if (tokenValue < 1000) {
+                        "\n\n⚠️ Внимание: При значении < 1000 токенов форматы JSON/XML будут отключены (ответы могут быть обрезаны)."
+                    } else {
+                        ""
+                    }
+
+                    val confirmMessage = """
+                        ✅ Лимит токенов установлен: $tokenValue
+
+                        Теперь модель будет генерировать не более $tokenValue токенов в ответе.
+
+                        💡 Примерно это:
+                        • ${tokenValue * 2} русских символов
+                        • ${tokenValue * 4} английских символов$warningNote
+                    """.trimIndent()
+
+                    bot.sendMessage(chatId, confirmMessage)
+                    logger.info { "Set max tokens to $tokenValue for user ${message.from?.username}" }
+                } catch (e: Exception) {
+                    val errorMessage = """
+                        ❌ Ошибка при установке лимита токенов: ${e.message}
+                    """.trimIndent()
+
+                    bot.sendMessage(chatId, errorMessage)
+                    logger.error(e) { "Failed to set max tokens for user ${message.from?.username}" }
+                }
             }
 
             command("quick_answer") {

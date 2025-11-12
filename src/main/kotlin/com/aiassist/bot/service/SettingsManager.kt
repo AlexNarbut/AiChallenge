@@ -14,11 +14,23 @@ class SettingsManager {
     // Store model selection per user (chatId -> modelId)
     private val userModels = ConcurrentHashMap<Long, String>()
 
+    // Store max output tokens per user (chatId -> maxTokens)
+    private val userMaxTokens = ConcurrentHashMap<Long, Int>()
+
     // Default temperature value
     private val defaultTemperature = 1.0
 
     // Default model
     private val defaultModel = "claude-sonnet-4-5-20250929"
+
+    // Default max output tokens
+    private val defaultMaxTokens = 4096
+
+    // Token limits validation
+    companion object {
+        const val MIN_TOKENS = 1
+        const val MAX_TOKENS = 10000
+    }
 
     /**
      * Available temperature options with descriptions
@@ -48,7 +60,7 @@ class SettingsManager {
             15.0,
             75.0,
             200_000,
-            32_000
+            2_000
         ),
         SONNET_4_5(
             "claude-sonnet-4-5-20250929",
@@ -57,7 +69,7 @@ class SettingsManager {
             3.0,
             15.0,
             200_000,
-            64_000
+            2_000
         ),
         HAIKU_4_5(
             "claude-haiku-4-5-20251001",
@@ -66,7 +78,7 @@ class SettingsManager {
             1.0,
             5.0,
             200_000,
-            64_000
+            2_000
         );
 
         /**
@@ -155,5 +167,37 @@ class SettingsManager {
      */
     fun resetModel(chatId: Long) {
         userModels.remove(chatId)
+    }
+
+    /**
+     * Set max output tokens for a user
+     * @throws IllegalArgumentException if tokens are out of range
+     */
+    fun setMaxTokens(chatId: Long, maxTokens: Int) {
+        require(maxTokens in MIN_TOKENS..MAX_TOKENS) {
+            "Max tokens must be between $MIN_TOKENS and $MAX_TOKENS"
+        }
+        userMaxTokens[chatId] = maxTokens
+    }
+
+    /**
+     * Get max output tokens for a user (returns default if not set)
+     */
+    fun getMaxTokens(chatId: Long): Int {
+        return userMaxTokens.getOrDefault(chatId, defaultMaxTokens)
+    }
+
+    /**
+     * Reset max tokens to default for a user
+     */
+    fun resetMaxTokens(chatId: Long) {
+        userMaxTokens.remove(chatId)
+    }
+
+    /**
+     * Validate if token value is in allowed range
+     */
+    fun isValidTokenValue(tokens: Int): Boolean {
+        return tokens in MIN_TOKENS..MAX_TOKENS
     }
 }

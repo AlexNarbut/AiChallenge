@@ -397,3 +397,145 @@ The bot supports user-configurable temperature settings for Claude API, allowing
 - Settings survive across different bot modes (normal, expert, reasoning)
 - ClaudeApiClient retrieves user's temperature from SettingsManager before each request
 - Temperature is logged for debugging purposes
+
+## Model Selection Feature
+
+The bot supports selecting different Claude models (Opus, Sonnet, Haiku) through the settings menu, allowing users to choose the best model for their needs based on performance and cost.
+
+**Key Components:**
+
+**SettingsManager** (`service/SettingsManager.kt`):
+- Maintains a ConcurrentHashMap tracking selected model per user
+- Provides three Claude model options with pricing information
+- Default model is Sonnet 4.5 (claude-sonnet-4-5-20250929)
+
+**Available Models (ModelOption enum):**
+
+1. **Opus 4.1** (`claude-opus-4-1-20250805`)
+   - Most powerful model for complex tasks
+   - Pricing: $15/MTok input, $75/MTok output
+   - Context: 200K tokens, Max output: 32K tokens
+
+2. **Sonnet 4.5** (`claude-sonnet-4-5-20250929`) - **Recommended**
+   - Best balance of quality and price
+   - Pricing: $3/MTok input, $15/MTok output
+   - Context: 200K tokens, Max output: 64K tokens
+
+3. **Haiku 4.5** (`claude-haiku-4-5-20251001`)
+   - Fast and economical model
+   - Pricing: $1/MTok input, $5/MTok output
+   - Context: 200K tokens, Max output: 64K tokens
+
+**Commands:**
+- `/settings` - Opens settings menu showing current model and temperature
+- `/model_opus` - Switch to Opus 4.1 (clears chat history)
+- `/model_sonnet` - Switch to Sonnet 4.5 (clears chat history)
+- `/model_haiku` - Switch to Haiku 4.5 (clears chat history)
+
+**How it works:**
+1. User sends `/settings` command to see current model and available options
+2. User selects desired model (e.g., `/model_sonnet`)
+3. SettingsManager stores the model selection for that user
+4. **Chat history is automatically cleared** when switching models
+5. All subsequent API requests use the user's selected model
+6. Model selection persists across conversations until changed
+
+**Implementation Details:**
+- Model selection is applied per-user and stored in memory
+- Chat history is cleared when changing models to avoid context mismatch
+- ClaudeApiClient retrieves user's model from SettingsManager before each request
+- Model pricing information is used to calculate cost per request
+
+## Response Metrics Feature
+
+Every response from the bot includes detailed metrics showing performance and cost information.
+
+**Metrics Displayed:**
+
+Each response includes a footer with the following information:
+- ⏱️ **Response Time**: Time taken to generate response (in seconds)
+- 📥 **Input Tokens**: Number of tokens in the request (user message + conversation history)
+- 📤 **Output Tokens**: Number of tokens in the response
+- 💰 **Cost**: Calculated cost for this specific request in USD (based on model pricing)
+- 🤖 **Model Used**: Name of the Claude model used (Opus 4.1, Sonnet 4.5, or Haiku 4.5)
+
+**Example Metrics Footer:**
+```
+📊 Метрики:
+⏱️ Время: 2.543s
+📥 Токены (вход): 1523
+📤 Токены (выход): 456
+💰 Стоимость: 0.011340$
+🤖 Модель: Sonnet 4.5
+```
+
+**ClaudeResponseWithMetrics** (`model/ClaudeModels.kt`):
+- New data class that wraps response message with metrics
+- Contains: message, inputTokens, outputTokens, responseTimeMs, cost, modelUsed
+- Returned by ClaudeApiClient instead of plain String
+
+**Cost Calculation:**
+- Cost is calculated using the formula: `(inputTokens / 1M * inputPrice) + (outputTokens / 1M * outputPrice)`
+- Prices are stored in the ModelOption enum for each model
+- Calculated in real-time for each request
+
+**Implementation Details:**
+- Response time is measured from start to end of API call in ClaudeApiClient
+- Token counts are extracted from Claude API response (Usage object)
+- Metrics are appended to the last message when splitting long responses
+- All metrics are logged for debugging and monitoring purposes
+
+## Token Limit Configuration Feature
+
+The bot allows users to configure the maximum number of output tokens per response, providing control over response length and API costs.
+
+**Key Components:**
+
+**SettingsManager** (`service/SettingsManager.kt`):
+- Maintains a ConcurrentHashMap tracking max tokens per user
+- Default max tokens: 4096
+- Token range validation: 1-10000 tokens
+- Provides validation method `isValidTokenValue()`
+
+**Commands:**
+- `/settings` - Shows current max tokens setting
+- `/set_tokens <number>` - Set maximum output tokens (range: 1-10000)
+
+**How it works:**
+1. User sends `/set_tokens <number>` command (e.g., `/set_tokens 2000`)
+2. Bot validates the input:
+   - Must be a number
+   - Must be in range 1-10000
+3. SettingsManager stores the token limit for that user
+4. All subsequent API requests use the user's token limit
+5. Token limit persists across conversations until changed
+
+**Validation:**
+- **Type check**: Value must be an integer
+- **Range check**: Value must be between `SettingsManager.MIN_TOKENS` (1) and `SettingsManager.MAX_TOKENS` (10000)
+- Error messages provide clear feedback for invalid inputs
+
+**Example Usage:**
+```
+/set_tokens 2000  → Sets max tokens to 2000
+/set_tokens abc   → Error: must be a number
+/set_tokens 15000 → Error: out of range (max 10000)
+```
+
+**Token Estimation:**
+The bot provides helpful approximations when setting tokens:
+- 1 token ≈ 2 Russian characters
+- 1 token ≈ 4 English characters
+
+**Implementation Details:**
+- Token limit is applied per-user and stored in memory
+- Settings survive across different bot modes (normal, expert, reasoning)
+- ClaudeApiClient retrieves user's max tokens from SettingsManager before each request
+- Token limit is included in the `ClaudeRequest` model's `maxTokens` field
+- Token limit is logged for debugging purposes
+
+**Smart Format Handling:**
+- If token limit is < 1000 and response format is JSON or XML, structured parsing is automatically disabled
+- This prevents incomplete JSON/XML responses that would fail parsing
+- Raw text response is returned instead when token limit is too low
+- User receives a warning when setting tokens < 1000 about JSON/XML format being disabled
