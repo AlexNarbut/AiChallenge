@@ -21,11 +21,9 @@ class TelegramBotService(
     private val config: TelegramBotConfig,
     private val claudeApiClient: ClaudeApiClient,
     private val pdfGenerator: PdfGenerator,
-    private val settingsManager: SettingsManager
+    private val settingsManager: SettingsManager,
+    private val historyManager: ConversationHistoryManager
 ) {
-    // Store conversation history per chat
-    private val conversationHistory = ConcurrentHashMap<Long, MutableList<Message>>()
-
     // Store expert mode state per chat
     private val expertMode = ConcurrentHashMap<Long, Boolean>()
 
@@ -42,8 +40,7 @@ class TelegramBotService(
 
                 logger.info { "Initializing bot for user ${message.from?.username}" }
 
-                // Initialize conversation history for this user
-                conversationHistory.getOrPut(userId) { mutableListOf() }
+                // History is automatically initialized in historyManager
 
                 // Verify Claude API client is working
                 bot.sendChatAction(chatId, com.github.kotlintelegrambot.entities.ChatAction.TYPING)
@@ -70,10 +67,17 @@ class TelegramBotService(
                     /expert - Беседа с экспертом-фитнес тренером
                     /reasoning - Решение логических задач со специализированными режимами
                     /normal - Вернуться в обычный режим
-                    /settings - ⚙️ Настройки (модель, температура)
+                    /settings - ⚙️ Настройки (модель, температура, токены)
                     /clear - Очистить историю разговора
 
+                    📚 История диалога:
+                    /history - Показать историю с резюме
+                    /history_stats - Статистика истории
+                    /set_history_threshold <токены> - Установить порог сжатия
+                    /summarize - Принудительно создать резюме
+
                     📊 Каждый ответ содержит метрики: время, токены и стоимость!
+                    🔄 История автоматически сжимается для экономии токенов!
 
                     ✅ Соединение с Claude API успешно проверено!
                     """.trimIndent()
@@ -86,8 +90,14 @@ class TelegramBotService(
                     /expert - Беседа с экспертом-фитнес тренером
                     /reasoning - Решение логических задач со специализированными режимами
                     /normal - Вернуться в обычный режим
-                    /settings - ⚙️ Настройки (модель, температура)
+                    /settings - ⚙️ Настройки (модель, температура, токены)
                     /clear - Очистить историю разговора
+
+                    📚 История диалога:
+                    /history - Показать историю с резюме
+                    /history_stats - Статистика истории
+                    /set_history_threshold <токены> - Установить порог сжатия
+                    /summarize - Принудительно создать резюме
 
                     ❌ Внимание: Не удалось подключиться к Claude API. Проверьте конфигурацию.
                     """.trimIndent()
@@ -101,11 +111,180 @@ class TelegramBotService(
                 val chatId = ChatId.fromId(message.chat.id)
                 val userId = message.chat.id
 
-                conversationHistory.remove(userId)
+                historyManager.clearHistory(userId)
 
                 val clearMessage = "🧹 История разговора очищена! Начинаем с чистого листа."
                 bot.sendMessage(chatId, clearMessage)
                 logger.info { "Cleared conversation history for user ${message.from?.username}" }
+            }
+
+            command("history") {
+                val chatId = ChatId.fromId(message.chat.id)
+                val userId = message.chat.id
+
+                val historyDisplay = historyManager.getHistoryDisplay(userId)
+
+                // Check if message is too long
+                if (historyDisplay.length > config.maxMessageLength) {
+                    // Split into chunks
+                    val chunks = historyDisplay.chunked(config.maxMessageLength)
+                    chunks.forEachIndexed { index, chunk ->
+                        bot.sendMessage(chatId, "📄 Часть ${index + 1}/${chunks.size}\n\n$chunk")
+                        Thread.sleep(100) // Small delay between messages
+                    }
+                } else {
+                    bot.sendMessage(chatId, historyDisplay)
+                }
+
+                logger.info { "Displayed history for user ${message.from?.username}" }
+            }
+
+            command("history_stats") {
+                val chatId = ChatId.fromId(message.chat.id)
+                val userId = message.chat.id
+
+                val stats = historyManager.getStats(userId)
+                val percentUsed = if (stats.compressionThreshold > 0) {
+                    (stats.estimatedTokens * 100) / stats.compressionThreshold
+                } else {
+                    0
+                }
+
+                val statsMessage = """
+                    📊 Статистика истории диалога
+
+                    📈 Всего обработано сообщений: ${stats.totalMessagesProcessed}
+                    📝 Количество резюме: ${stats.summariesCount}
+                    💬 Последних детальных сообщений: ${stats.recentMessagesCount}
+                    🔢 Примерный размер (токены): ${stats.estimatedTokens} / ${stats.compressionThreshold} ($percentUsed%)
+
+                    ⚙️ Порог сжатия: ${stats.compressionThreshold} токенов
+                    ${if (stats.estimatedTokens > stats.compressionThreshold) "⚠️ Сжатие будет выполнено при следующем сообщении" else ""}
+
+                    💡 Совет: Используйте /set_history_threshold для изменения порога сжатия.
+                """.trimIndent()
+
+                bot.sendMessage(chatId, statsMessage)
+                logger.info { "Displayed history stats for user ${message.from?.username}" }
+            }
+
+            command("set_history_threshold") {
+                val chatId = ChatId.fromId(message.chat.id)
+                val userId = message.chat.id
+                val args = message.text?.split(" ")?.drop(1)
+
+                if (args.isNullOrEmpty()) {
+                    val current = settingsManager.getHistoryThreshold(userId)
+                    val errorMessage = """
+                        ❌ Ошибка: Не указано значение
+
+                        Использование: /set_history_threshold <токены>
+                        Пример: /set_history_threshold 2000
+
+                        Диапазон: ${SettingsManager.MIN_HISTORY_THRESHOLD}-${SettingsManager.MAX_HISTORY_THRESHOLD} токенов
+                        Текущее значение: $current токенов
+                    """.trimIndent()
+
+                    bot.sendMessage(chatId, errorMessage)
+                    logger.warn { "User ${message.from?.username} tried to set history threshold without value" }
+                    return@command
+                }
+
+                val thresholdValue = args[0].toIntOrNull()
+
+                if (thresholdValue == null) {
+                    val errorMessage = """
+                        ❌ Ошибка: Значение должно быть числом
+
+                        Использование: /set_history_threshold <токены>
+                        Пример: /set_history_threshold 2000
+
+                        Вы ввели: ${args[0]}
+                    """.trimIndent()
+
+                    bot.sendMessage(chatId, errorMessage)
+                    logger.warn { "User ${message.from?.username} tried to set history threshold with non-numeric value: ${args[0]}" }
+                    return@command
+                }
+
+                if (!settingsManager.isValidHistoryThreshold(thresholdValue)) {
+                    val errorMessage = """
+                        ❌ Ошибка: Значение вне допустимого диапазона
+
+                        Допустимый диапазон: ${SettingsManager.MIN_HISTORY_THRESHOLD}-${SettingsManager.MAX_HISTORY_THRESHOLD} токенов
+                        Вы ввели: $thresholdValue
+
+                        💡 Рекомендуемые значения:
+                        • 1000 - Для быстрой проверки (минимальная история)
+                        • 4000 - Для экономии (~10 сообщений)
+                        • 8000 - По умолчанию (баланс)
+                        • 15000 - Большой контекст (~40 сообщений)
+                    """.trimIndent()
+
+                    bot.sendMessage(chatId, errorMessage)
+                    logger.warn { "User ${message.from?.username} tried to set history threshold out of range: $thresholdValue" }
+                    return@command
+                }
+
+                try {
+                    settingsManager.setHistoryThreshold(userId, thresholdValue)
+
+                    val confirmMessage = """
+                        ✅ Порог сжатия установлен: $thresholdValue токенов
+
+                        История будет автоматически сжиматься когда размер превысит это значение.
+
+                        💡 При сжатии:
+                        • Сохраняется ~${thresholdValue / 2} токенов последних сообщений
+                        • Остальное превращается в резюме
+                        • Экономия составляет до 80% токенов
+
+                        📊 Используйте /history_stats для просмотра текущего статуса.
+                    """.trimIndent()
+
+                    bot.sendMessage(chatId, confirmMessage)
+                    logger.info { "Set history threshold to $thresholdValue for user ${message.from?.username}" }
+                } catch (e: Exception) {
+                    val errorMessage = """
+                        ❌ Ошибка при установке порога: ${e.message}
+                    """.trimIndent()
+
+                    bot.sendMessage(chatId, errorMessage)
+                    logger.error(e) { "Failed to set history threshold for user ${message.from?.username}" }
+                }
+            }
+
+            command("summarize") {
+                val chatId = ChatId.fromId(message.chat.id)
+                val userId = message.chat.id
+
+                bot.sendMessage(chatId, "⏳ Создаю резюме истории диалога...")
+                bot.sendChatAction(chatId, com.github.kotlintelegrambot.entities.ChatAction.TYPING)
+
+                val success = runBlocking {
+                    val summaryGenerator: suspend (List<Message>) -> String = { messages ->
+                        claudeApiClient.generateSummary(messages, userId)
+                    }
+
+                    historyManager.forceCompress(userId, summaryGenerator)
+                }
+
+                val resultMessage = if (success) {
+                    """
+                        ✅ Резюме успешно создано!
+
+                        История сжата. Используйте /history для просмотра или /history_stats для статистики.
+                    """.trimIndent()
+                } else {
+                    """
+                        ❌ Недостаточно сообщений для создания резюме.
+
+                        Необходимо минимум 4 сообщения в истории.
+                    """.trimIndent()
+                }
+
+                bot.sendMessage(chatId, resultMessage)
+                logger.info { "Manual summarize for user ${message.from?.username}: success=$success" }
             }
 
             command("expert") {
@@ -113,7 +292,7 @@ class TelegramBotService(
                 val userId = message.chat.id
 
                 expertMode[userId] = true
-                conversationHistory.remove(userId) // Clear history when switching modes
+                historyManager.clearHistory(userId) // Clear history when switching modes
 
                 val expertMessage = """
                     👨‍⚕️ Режим эксперта активирован!
@@ -135,7 +314,7 @@ class TelegramBotService(
 
                 expertMode[userId] = false
                 reasoningMode.remove(userId)
-                conversationHistory.remove(userId) // Clear history when switching modes
+                historyManager.clearHistory(userId) // Clear history when switching modes
 
                 val normalMessage = """
                     💬 Обычный режим активирован!
@@ -158,7 +337,7 @@ class TelegramBotService(
 
                 expertMode[userId] = false
                 reasoningMode.remove(userId)
-                conversationHistory.remove(userId)
+                historyManager.clearHistory(userId)
 
                 val reasoningMessage = """
                     🧠 Reasoning Mode
@@ -278,7 +457,7 @@ class TelegramBotService(
                 val userId = message.chat.id
 
                 settingsManager.setModel(userId, "claude-opus-4-1-20250805")
-                conversationHistory.remove(userId) // Clear history when changing model
+                historyManager.clearHistory(userId) // Clear history when changing model
 
                 val confirmMessage = """
                     ✅ Модель установлена: Opus 4.1 💎
@@ -300,7 +479,7 @@ class TelegramBotService(
                 val userId = message.chat.id
 
                 settingsManager.setModel(userId, "claude-sonnet-4-5-20250929")
-                conversationHistory.remove(userId) // Clear history when changing model
+                historyManager.clearHistory(userId) // Clear history when changing model
 
                 val confirmMessage = """
                     ✅ Модель установлена: Sonnet 4.5 ⭐
@@ -322,7 +501,7 @@ class TelegramBotService(
                 val userId = message.chat.id
 
                 settingsManager.setModel(userId, "claude-haiku-4-5-20251001")
-                conversationHistory.remove(userId) // Clear history when changing model
+                historyManager.clearHistory(userId) // Clear history when changing model
 
                 val confirmMessage = """
                     ✅ Модель установлена: Haiku 4.5 ⚡
@@ -431,7 +610,7 @@ class TelegramBotService(
 
                 expertMode[userId] = false
                 reasoningMode[userId] = "basic"
-                conversationHistory.remove(userId)
+                historyManager.clearHistory(userId)
 
                 val responseMessage = """
                     ⚡ Режим "Быстрый ответ" активирован
@@ -455,7 +634,7 @@ class TelegramBotService(
 
                 expertMode[userId] = false
                 reasoningMode[userId] = "mathematical"
-                conversationHistory.remove(userId)
+                historyManager.clearHistory(userId)
 
                 val responseMessage = """
                     📊 Режим "Пошаговый ответ" активирован
@@ -479,7 +658,7 @@ class TelegramBotService(
 
                 expertMode[userId] = false
                 reasoningMode[userId] = "strategic"
-                conversationHistory.remove(userId)
+                historyManager.clearHistory(userId)
 
                 val responseMessage = """
                     🎯 Режим "Составление промпта" активирован
@@ -503,7 +682,7 @@ class TelegramBotService(
 
                 expertMode[userId] = false
                 reasoningMode[userId] = "creative"
-                conversationHistory.remove(userId)
+                historyManager.clearHistory(userId)
 
                 val responseMessage = """
                     👥 Режим "Мнение экспертов" активирован
@@ -541,9 +720,6 @@ class TelegramBotService(
                 // Send "typing" action to show bot is processing
                 bot.sendChatAction(chatId, com.github.kotlintelegrambot.entities.ChatAction.TYPING)
 
-                // Get or create conversation history for this chat
-                val history = conversationHistory.getOrPut(userId) { mutableListOf() }
-
                 // Check if expert mode is enabled for this user
                 val isExpertMode = expertMode[userId] ?: false
 
@@ -552,12 +728,41 @@ class TelegramBotService(
 
                 // Get response from Claude API with conversation history
                 val responseWithMetrics = runBlocking {
-                    claudeApiClient.sendMessageWithHistory(userMessage, history, userId, isExpertMode, reasoningType)
+                    // Create summary generator function
+                    val summaryGenerator: suspend (List<Message>) -> String = { messages ->
+                        claudeApiClient.generateSummary(messages, userId)
+                    }
+
+                    // Add user message to history BEFORE API call (compression may trigger)
+                    historyManager.addMessage(userId, Message(role = "user", content = userMessage), summaryGenerator)
+
+                    // Get messages for API (includes summaries and all messages including the new one)
+                    // IMPORTANT: getMessagesForApi already includes the user message we just added
+                    val messagesForApi = historyManager.getMessagesForApi(userId).toMutableList()
+
+                    // Remove the last user message from API list since sendMessageWithHistory will add it again
+                    val messagesToSend = messagesForApi.dropLast(1).toMutableList()
+
+                    // Send to Claude API - it will add userMessage internally
+                    val response = claudeApiClient.sendMessageWithHistory(userMessage, messagesToSend, userId, isExpertMode, reasoningType)
+
+                    // Add assistant response to history manager AFTER getting response
+                    historyManager.addMessage(userId, Message(role = "assistant", content = response.message), summaryGenerator)
+
+                    response
                 }
 
                 val response = responseWithMetrics.message
 
-                // Format metrics footer
+                // Get history stats for display
+                val historyStats = historyManager.getStats(userId)
+                val historyPercent = if (historyStats.compressionThreshold > 0) {
+                    (historyStats.estimatedTokens * 100) / historyStats.compressionThreshold
+                } else {
+                    0
+                }
+
+                // Format metrics footer with history info
                 val metricsFooter = """
 
 
@@ -567,6 +772,7 @@ class TelegramBotService(
                     📤 Токены (выход): ${responseWithMetrics.outputTokens}
                     💰 Стоимость: ${"%.6f".format(responseWithMetrics.cost)}$
                     🤖 Модель: ${settingsManager.getModelOption(responseWithMetrics.modelUsed)?.displayName ?: responseWithMetrics.modelUsed}
+                    📚 История: ${historyStats.estimatedTokens}/${historyStats.compressionThreshold} токенов ($historyPercent%)
                 """.trimIndent()
 
                 logger.info { "Response length: ${response.length} characters, metrics: ${responseWithMetrics.outputTokens} tokens, ${responseWithMetrics.responseTimeMs}ms, cost: ${responseWithMetrics.cost}" }

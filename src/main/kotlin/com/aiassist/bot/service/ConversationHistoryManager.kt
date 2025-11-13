@@ -1,0 +1,323 @@
+package com.aiassist.bot.service
+
+import com.aiassist.bot.model.Message
+import mu.KotlinLogging
+import org.springframework.stereotype.Service
+import java.util.concurrent.ConcurrentHashMap
+
+private val logger = KotlinLogging.logger {}
+
+/**
+ * Manages conversation history with automatic compression using summaries
+ *
+ * Strategy: Token-based compression with sliding window + summaries
+ * - Compression triggered when token count exceeds threshold
+ * - Keeps recent messages within token budget
+ * - Older messages are summarized
+ * - Multiple summaries can be merged into one
+ */
+@Service
+class ConversationHistoryManager(
+    private val settingsManager: SettingsManager
+) {
+
+    // Store conversation history per chat
+    private val conversations = ConcurrentHashMap<Long, ConversationHistory>()
+
+    companion object {
+        // Maximum number of summaries before merging them
+        const val MAX_SUMMARIES = 2
+
+        // Token estimation: 1 token ≈ 3 characters (conservative for Russian/English mix)
+        const val CHARS_PER_TOKEN = 3
+    }
+
+    /**
+     * Data class to hold conversation history with summaries
+     */
+    data class ConversationHistory(
+        val summaries: MutableList<String> = mutableListOf(),
+        val recentMessages: MutableList<Message> = mutableListOf(),
+        var totalMessagesProcessed: Int = 0
+    ) {
+        /**
+         * Get all messages for API request (summaries as system messages + recent messages)
+         */
+        fun getMessagesForApi(): List<Message> {
+            val messages = mutableListOf<Message>()
+
+            // Add summaries as user messages with special marker
+            summaries.forEach { summary ->
+                messages.add(Message(role = "user", content = "[CONTEXT SUMMARY]: $summary"))
+                messages.add(Message(role = "assistant", content = "Understood. I'll keep this context in mind."))
+            }
+
+            // Add recent detailed messages
+            messages.addAll(recentMessages)
+
+            return messages
+        }
+
+        /**
+         * Estimate token count for all messages
+         * Using conservative estimate: 1 token ≈ 3 characters
+         */
+        fun estimateTokens(): Int {
+            val summaryTokens = summaries.sumOf { it.length / CHARS_PER_TOKEN }
+            val recentTokens = recentMessages.sumOf { it.content.length / CHARS_PER_TOKEN }
+            return summaryTokens + recentTokens
+        }
+
+        /**
+         * Estimate token count for recent messages only
+         */
+        fun estimateRecentTokens(): Int {
+            return recentMessages.sumOf { it.content.length / CHARS_PER_TOKEN }
+        }
+    }
+
+    /**
+     * Statistics about conversation history
+     */
+    data class HistoryStats(
+        val totalMessagesProcessed: Int,
+        val summariesCount: Int,
+        val recentMessagesCount: Int,
+        val estimatedTokens: Int,
+        val compressionThreshold: Int
+    )
+
+    /**
+     * Get or create conversation history for a chat
+     */
+    fun getHistory(chatId: Long): ConversationHistory {
+        return conversations.getOrPut(chatId) { ConversationHistory() }
+    }
+
+    /**
+     * Add a message to the conversation history
+     * Automatically triggers compression if needed
+     */
+    suspend fun addMessage(chatId: Long, message: Message, summaryGenerator: suspend (List<Message>) -> String) {
+        val history = getHistory(chatId)
+
+        history.recentMessages.add(message)
+        history.totalMessagesProcessed++
+
+        val estimatedTokens = history.estimateRecentTokens()
+        logger.debug { "Added message to history for chat $chatId. Total recent: ${history.recentMessages.size}, estimated tokens: $estimatedTokens" }
+
+        // Check if we need to compress
+        if (shouldCompress(chatId, history)) {
+            compressHistory(chatId, summaryGenerator)
+        }
+    }
+
+    /**
+     * Check if history needs compression based on token count
+     */
+    private fun shouldCompress(chatId: Long, history: ConversationHistory): Boolean {
+        val threshold = settingsManager.getHistoryThreshold(chatId)
+        val recentTokens = history.estimateRecentTokens()
+
+        val needsCompression = recentTokens > threshold
+
+        if (needsCompression) {
+            logger.info { "Compression triggered for chat $chatId. Recent tokens: $recentTokens, threshold: $threshold" }
+        }
+
+        return needsCompression
+    }
+
+    /**
+     * Compress old messages into a summary
+     * Keeps approximately half of the messages and summarizes the rest
+     */
+    suspend fun compressHistory(chatId: Long, summaryGenerator: suspend (List<Message>) -> String) {
+        val history = getHistory(chatId)
+        val threshold = settingsManager.getHistoryThreshold(chatId)
+        val recentTokens = history.estimateRecentTokens()
+
+        if (recentTokens <= threshold) {
+            logger.debug { "No compression needed for chat $chatId. Tokens: $recentTokens, threshold: $threshold" }
+            return
+        }
+
+        logger.info { "Compressing history for chat $chatId. Current messages: ${history.recentMessages.size}, tokens: $recentTokens" }
+
+        // Keep approximately half the threshold worth of recent messages
+        val targetKeepTokens = threshold / 2
+        val messagesToKeep = mutableListOf<Message>()
+        var accumulatedTokens = 0
+
+        // Take messages from the end (most recent) until we reach target token count
+        for (message in history.recentMessages.reversed()) {
+            val messageTokens = message.content.length / CHARS_PER_TOKEN
+            if (accumulatedTokens + messageTokens <= targetKeepTokens) {
+                messagesToKeep.add(0, message) // Add to beginning to maintain order
+                accumulatedTokens += messageTokens
+            } else {
+                break
+            }
+        }
+
+        // Ensure we keep at least 2 messages (1 pair) for context
+        if (messagesToKeep.size < 2 && history.recentMessages.size >= 2) {
+            messagesToKeep.clear()
+            messagesToKeep.addAll(history.recentMessages.takeLast(2))
+        }
+
+        // Messages to summarize are the ones we're not keeping
+        val messagesToSummarize = history.recentMessages.take(history.recentMessages.size - messagesToKeep.size)
+
+        if (messagesToSummarize.isEmpty()) {
+            logger.warn { "No messages to summarize for chat $chatId" }
+            return
+        }
+
+        try {
+            // Generate summary
+            val summary = summaryGenerator(messagesToSummarize)
+
+            logger.info { "Generated summary for chat $chatId: ${summary.take(100)}..." }
+
+            // Add summary
+            history.summaries.add(summary)
+
+            // Keep only recent messages
+            history.recentMessages.clear()
+            history.recentMessages.addAll(messagesToKeep)
+
+            val newTokenCount = history.estimateRecentTokens()
+            logger.info { "Compression complete. Summaries: ${history.summaries.size}, Recent messages: ${history.recentMessages.size}, tokens after: $newTokenCount" }
+
+            // Check if we need to merge summaries
+            if (history.summaries.size > MAX_SUMMARIES) {
+                mergeSummaries(chatId, summaryGenerator)
+            }
+        } catch (e: Exception) {
+            logger.error(e) { "Failed to compress history for chat $chatId" }
+        }
+    }
+
+    /**
+     * Merge multiple summaries into one
+     */
+    private suspend fun mergeSummaries(chatId: Long, summaryGenerator: suspend (List<Message>) -> String) {
+        val history = getHistory(chatId)
+
+        if (history.summaries.size <= MAX_SUMMARIES) {
+            return
+        }
+
+        logger.info { "Merging ${history.summaries.size} summaries for chat $chatId" }
+
+        try {
+            // Create a combined text from all summaries
+            val combinedSummaries = history.summaries.joinToString("\n\n---\n\n")
+
+            // Generate a mega-summary
+            val messages = listOf(
+                Message(role = "user", content = "Please provide a concise summary of these conversation summaries:\n\n$combinedSummaries")
+            )
+
+            val megaSummary = summaryGenerator(messages)
+
+            // Replace all summaries with one
+            history.summaries.clear()
+            history.summaries.add(megaSummary)
+
+            logger.info { "Merged summaries into one for chat $chatId" }
+        } catch (e: Exception) {
+            logger.error(e) { "Failed to merge summaries for chat $chatId" }
+        }
+    }
+
+    /**
+     * Get messages for API request
+     */
+    fun getMessagesForApi(chatId: Long): List<Message> {
+        return getHistory(chatId).getMessagesForApi()
+    }
+
+    /**
+     * Get statistics for a conversation
+     */
+    fun getStats(chatId: Long): HistoryStats {
+        val history = getHistory(chatId)
+        val threshold = settingsManager.getHistoryThreshold(chatId)
+
+        return HistoryStats(
+            totalMessagesProcessed = history.totalMessagesProcessed,
+            summariesCount = history.summaries.size,
+            recentMessagesCount = history.recentMessages.size,
+            estimatedTokens = history.estimateTokens(),
+            compressionThreshold = threshold
+        )
+    }
+
+    /**
+     * Clear history for a chat
+     */
+    fun clearHistory(chatId: Long) {
+        conversations.remove(chatId)
+        logger.info { "Cleared history for chat $chatId" }
+    }
+
+    /**
+     * Get formatted history display for user
+     */
+    fun getHistoryDisplay(chatId: Long): String {
+        val history = getHistory(chatId)
+
+        return buildString {
+            appendLine("📚 История диалога")
+            appendLine()
+
+            if (history.summaries.isNotEmpty()) {
+                appendLine("📝 Резюме предыдущих сообщений (${history.summaries.size}):")
+                appendLine()
+                history.summaries.forEachIndexed { index, summary ->
+                    appendLine("--- Резюме ${index + 1} ---")
+                    appendLine(summary.take(500) + if (summary.length > 500) "..." else "")
+                    appendLine()
+                }
+            }
+
+            if (history.recentMessages.isNotEmpty()) {
+                appendLine("💬 Последние сообщения (${history.recentMessages.size}):")
+                appendLine()
+                history.recentMessages.forEachIndexed { index, message ->
+                    val role = when (message.role) {
+                        "user" -> "👤 Вы"
+                        "assistant" -> "🤖 Ассистент"
+                        else -> message.role
+                    }
+                    val preview = message.content.take(200) + if (message.content.length > 200) "..." else ""
+                    appendLine("${index + 1}. $role:")
+                    appendLine(preview)
+                    appendLine()
+                }
+            }
+
+            if (history.summaries.isEmpty() && history.recentMessages.isEmpty()) {
+                appendLine("История пуста. Начните диалог!")
+            }
+        }
+    }
+
+    /**
+     * Force compression for a specific chat (manual trigger)
+     */
+    suspend fun forceCompress(chatId: Long, summaryGenerator: suspend (List<Message>) -> String): Boolean {
+        val history = getHistory(chatId)
+
+        if (history.recentMessages.size < 4) {
+            logger.warn { "Not enough messages to compress for chat $chatId" }
+            return false
+        }
+
+        compressHistory(chatId, summaryGenerator)
+        return true
+    }
+}

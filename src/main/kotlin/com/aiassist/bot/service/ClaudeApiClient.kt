@@ -204,6 +204,60 @@ class ClaudeApiClient(
         }
     }
 
+    /**
+     * Generate a summary of conversation messages
+     * Used for history compression
+     */
+    suspend fun generateSummary(messages: List<Message>, chatId: Long): String {
+        return try {
+            logger.info { "Generating summary for ${messages.size} messages for chatId: $chatId" }
+
+            // Create a prompt for summarization
+            val conversationText = messages.joinToString("\n") { message ->
+                "${message.role.uppercase()}: ${message.content}"
+            }
+
+            val summaryPrompt = """
+                Please provide a concise summary of the following conversation.
+                Focus on key topics, decisions, and important information discussed.
+                Keep the summary brief but informative (2-4 sentences).
+
+                Conversation:
+                $conversationText
+            """.trimIndent()
+
+            val summaryRequest = ClaudeRequest(
+                model = settingsManager.getModel(chatId),
+                maxTokens = 500, // Short summary
+                messages = listOf(Message(role = "user", content = summaryPrompt)),
+                temperature = 0.3 // Lower temperature for consistent summaries
+            )
+
+            val httpResponse = client.post(config.apiUrl) {
+                contentType(ContentType.Application.Json)
+                header("x-api-key", config.key)
+                header("anthropic-version", config.version)
+                setBody(summaryRequest)
+            }
+
+            if (httpResponse.status.value in 200..299) {
+                val response: ClaudeResponse = httpResponse.body()
+                val summary = response.content
+                    .filter { it.type == "text" }
+                    .joinToString("") { it.text }
+
+                logger.info { "Generated summary (${summary.length} chars): ${summary.take(100)}..." }
+                summary
+            } else {
+                logger.error { "Failed to generate summary: ${httpResponse.status}" }
+                "Summary generation failed"
+            }
+        } catch (e: Exception) {
+            logger.error(e) { "Error generating summary" }
+            "Summary generation failed: ${e.message}"
+        }
+    }
+
     fun close() {
         client.close()
     }

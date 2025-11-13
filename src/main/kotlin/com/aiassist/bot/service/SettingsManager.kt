@@ -17,8 +17,11 @@ class SettingsManager {
     // Store max output tokens per user (chatId -> maxTokens)
     private val userMaxTokens = ConcurrentHashMap<Long, Int>()
 
+    // Store history compression threshold per user (chatId -> tokenThreshold)
+    private val userHistoryThresholds = ConcurrentHashMap<Long, Int>()
+
     // Default temperature value
-    private val defaultTemperature = 1.0
+    private val defaultTemperature = 0.6
 
     // Default model
     private val defaultModel = "claude-sonnet-4-5-20250929"
@@ -26,10 +29,17 @@ class SettingsManager {
     // Default max output tokens
     private val defaultMaxTokens = 4096
 
+    // Default history compression threshold (in tokens)
+    private val defaultHistoryThreshold = 8000
+
     // Token limits validation
     companion object {
         const val MIN_TOKENS = 1
         const val MAX_TOKENS = 10000
+
+        // History compression threshold limits
+        const val MIN_HISTORY_THRESHOLD = 500
+        const val MAX_HISTORY_THRESHOLD = 50000
     }
 
     /**
@@ -199,5 +209,37 @@ class SettingsManager {
      */
     fun isValidTokenValue(tokens: Int): Boolean {
         return tokens in MIN_TOKENS..MAX_TOKENS
+    }
+
+    /**
+     * Set history compression threshold for a user (in tokens)
+     * @throws IllegalArgumentException if threshold is out of range
+     */
+    fun setHistoryThreshold(chatId: Long, threshold: Int) {
+        require(threshold in MIN_HISTORY_THRESHOLD..MAX_HISTORY_THRESHOLD) {
+            "History threshold must be between $MIN_HISTORY_THRESHOLD and $MAX_HISTORY_THRESHOLD"
+        }
+        userHistoryThresholds[chatId] = threshold
+    }
+
+    /**
+     * Get history compression threshold for a user (returns default if not set)
+     */
+    fun getHistoryThreshold(chatId: Long): Int {
+        return userHistoryThresholds.getOrDefault(chatId, defaultHistoryThreshold)
+    }
+
+    /**
+     * Reset history threshold to default for a user
+     */
+    fun resetHistoryThreshold(chatId: Long) {
+        userHistoryThresholds.remove(chatId)
+    }
+
+    /**
+     * Validate if history threshold value is in allowed range
+     */
+    fun isValidHistoryThreshold(threshold: Int): Boolean {
+        return threshold in MIN_HISTORY_THRESHOLD..MAX_HISTORY_THRESHOLD
     }
 }

@@ -458,6 +458,7 @@ Each response includes a footer with the following information:
 - 📤 **Output Tokens**: Number of tokens in the response
 - 💰 **Cost**: Calculated cost for this specific request in USD (based on model pricing)
 - 🤖 **Model Used**: Name of the Claude model used (Opus 4.1, Sonnet 4.5, or Haiku 4.5)
+- 📚 **History**: Current history size / threshold in tokens with percentage (NEW!)
 
 **Example Metrics Footer:**
 ```
@@ -467,7 +468,14 @@ Each response includes a footer with the following information:
 📤 Токены (выход): 456
 💰 Стоимость: 0.011340$
 🤖 Модель: Sonnet 4.5
+📚 История: 6500/8000 токенов (81%)
 ```
+
+**History Display in Metrics:**
+- Shows current history size vs compression threshold
+- Percentage indicates how close to compression trigger
+- Updates in real-time with each message
+- Helps users monitor when compression will occur
 
 **ClaudeResponseWithMetrics** (`model/ClaudeModels.kt`):
 - New data class that wraps response message with metrics
@@ -539,3 +547,161 @@ The bot provides helpful approximations when setting tokens:
 - This prevents incomplete JSON/XML responses that would fail parsing
 - Raw text response is returned instead when token limit is too low
 - User receives a warning when setting tokens < 1000 about JSON/XML format being disabled
+
+## Conversation History Management Feature
+
+The bot implements intelligent conversation history management with automatic compression to optimize token usage and reduce API costs.
+
+**Strategy: Hybrid Sliding Window + Summaries**
+
+The bot uses a sophisticated approach combining:
+- **Sliding Window**: Keeps last N messages in full detail
+- **Automatic Summarization**: Older messages are compressed into summaries
+- **Multi-level Compression**: Multiple summaries can be merged into one
+
+**Key Components:**
+
+**ConversationHistoryManager** (`service/ConversationHistoryManager.kt`):
+- Manages conversation history per user
+- Automatically triggers compression when needed
+- Stores summaries and recent messages separately
+- Provides statistics and history display
+
+**Configuration Parameters:**
+- `DEFAULT_HISTORY_THRESHOLD` = 8000 tokens - Default compression trigger
+- `MIN_HISTORY_THRESHOLD` = 500 tokens - Minimum allowed threshold
+- `MAX_HISTORY_THRESHOLD` = 50000 tokens - Maximum allowed threshold
+- `MAX_SUMMARIES` = 2 - Maximum summaries before merging
+- `CHARS_PER_TOKEN` = 3 - Token estimation ratio (conservative)
+
+**Token-Based Compression (New Approach):**
+
+Instead of counting messages, compression is triggered by **token count**:
+
+1. User sends messages normally
+2. System estimates tokens: `message length / 3` (conservative)
+3. When estimated tokens exceed threshold (e.g., 8000):
+   - Compression automatically triggers
+   - Keeps ~50% of threshold worth of recent messages
+   - Rest are summarized via Claude API
+4. Summary is stored (typically 2-4 sentences)
+5. When summaries exceed 2:
+   - All summaries are merged into one mega-summary
+   - Prevents summary accumulation
+
+**Why Token-Based is Better:**
+- ✅ Handles long messages correctly (1 message can be 5000 tokens)
+- ✅ Handles short messages correctly (100 messages can be 500 tokens)
+- ✅ More predictable cost control
+- ✅ Better alignment with Claude API pricing
+- ✅ User-configurable threshold per chat
+
+**History Structure:**
+```
+API Request Contains:
+┌─────────────────────────────────────┐
+│ [Summary 1] (as context message)    │ ← Compressed old messages
+│ [Summary 2] (as context message)    │
+├─────────────────────────────────────┤
+│ [Recent Message 1] User: ...        │ ← Full detail
+│ [Recent Message 2] Assistant: ...   │
+│ ...                                 │
+│ [Recent Message 20] Assistant: ...  │
+└─────────────────────────────────────┘
+```
+
+**Commands:**
+
+- `/history` - Display conversation history with summaries and recent messages
+- `/history_stats` - Show statistics (total messages, summaries count, estimated tokens, threshold)
+- `/set_history_threshold <tokens>` - Set compression threshold (500-50000 tokens)
+- `/summarize` - Manually trigger history compression
+- `/clear` - Clear all history and start fresh
+
+**Summary Generation:**
+
+Summaries are generated using Claude API with:
+- Lower temperature (0.3) for consistency
+- Fixed token limit (500 tokens)
+- Focused prompt asking for key topics and decisions
+- Automatic retry on failure
+
+**Cost Savings Example:**
+
+**Without Compression (100 messages):**
+- Input tokens: ~50,000
+- Cost per request: ~$0.15 (Sonnet 4.5)
+
+**With Compression (100 messages):**
+- Summary: ~500 tokens
+- Recent messages: ~10,000 tokens
+- Total input: ~10,500 tokens
+- Cost per request: ~$0.03
+- **Savings: 80%!**
+
+**Implementation Details:**
+
+- History is stored in-memory per user (ConcurrentHashMap)
+- Summaries are injected as special context messages
+- Compression is transparent to the user
+- All mode changes (expert, reasoning) clear history
+- Model changes also clear history to avoid context mismatch
+
+**Message Flow:**
+1. User sends message → Added to `historyManager` (may trigger compression)
+2. Compression (if needed): Old messages → Claude API → Summary created
+3. `historyManager.getMessagesForApi()` returns: [Summaries] + [Recent messages]
+4. Messages sent to Claude API for response generation
+5. Assistant response → Added to `historyManager` (may trigger compression)
+6. User sees response with history metrics
+
+**Important:** Each message is added to `historyManager` exactly once, ensuring summaries are created correctly and history doesn't duplicate.
+
+**History Display Format:**
+
+```
+📚 История диалога
+
+📝 Резюме предыдущих сообщений (2):
+--- Резюме 1 ---
+[Summary text...]
+
+--- Резюме 2 ---
+[Summary text...]
+
+💬 Последние сообщения (20):
+1. 👤 Вы: [message preview...]
+2. 🤖 Ассистент: [response preview...]
+...
+```
+
+**Statistics Display:**
+
+```
+📊 Статистика истории диалога
+
+📈 Всего обработано сообщений: 45
+📝 Количество резюме: 2
+💬 Последних детальных сообщений: 20
+🔢 Примерный размер (токены): 6500 / 8000 (81%)
+
+⚙️ Порог сжатия: 8000 токенов
+
+💡 Совет: Используйте /set_history_threshold для изменения порога сжатия.
+```
+
+**Recommended Threshold Values:**
+- **1000 tokens** - Quick testing (minimal history, ~2-3 messages)
+- **4000 tokens** - Economy mode (~ 10 messages, frequent compression)
+- **8000 tokens** - Default balanced (~ 20 messages, good balance)
+- **15000 tokens** - Large context (~ 40 messages, rare compression)
+- **30000 tokens** - Maximum context (~ 80 messages, minimal compression)
+
+**Benefits:**
+
+1. **Cost Optimization**: Reduces token usage by up to 80%
+2. **Context Preservation**: Important information retained in summaries
+3. **No Token Limit Issues**: Prevents hitting Claude's 200K context limit
+4. **Transparent**: Works automatically without user intervention
+5. **Flexible**: Manual compression available via `/summarize`
+6. **Informative**: Users can view history and statistics anytime

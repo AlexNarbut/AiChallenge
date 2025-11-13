@@ -17,7 +17,7 @@ data class ClaudeApiConfig(
     var apiUrl: String = "",
     var version: String = "",
     var responseFormat: String = "text", // Options: "text", "json", "xml"
-    var defaultTemperature: Double = 1.0, // Default temperature for Claude API (0.0-1.0)
+    var defaultTemperature: Double = 0.6, // Default temperature for Claude API (0.0-1.0)
     var expertPrompt: String = "expert_system_prompt", // Filename without .txt extension
     var reasoningPrompts: Map<String, String> = mapOf(
         "basic" to "reasoning_quick_answer_system_prompt",
