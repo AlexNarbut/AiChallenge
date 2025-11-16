@@ -29,7 +29,10 @@ class ClaudeApiClient(
 ) {
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
-            jackson()
+            jackson {
+                // Don't include null values in JSON
+                setSerializationInclusion(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            }
         }
         install(Logging) {
             level = LogLevel.INFO
@@ -112,12 +115,20 @@ class ClaudeApiClient(
                 temperature = temperature
             )
 
+            // Log request details for performance debugging
+            val inputChars = history.sumOf { it.content.length }
+            val estimatedInputTokens = inputChars / 3
+            logger.info { "📊 Request stats: ${history.size} messages, ~$inputChars chars (~$estimatedInputTokens tokens), model: $selectedModel, max_tokens: $maxTokens" }
+
+            val apiCallStart = System.currentTimeMillis()
             val httpResponse = client.post(config.apiUrl) {
                 contentType(ContentType.Application.Json)
                 header("x-api-key", config.key)
                 header("anthropic-version", config.version)
                 setBody(request)
             }
+            val apiCallDuration = System.currentTimeMillis() - apiCallStart
+            logger.info { "⏱️ Claude API call took ${apiCallDuration}ms (${apiCallDuration / 1000.0}s)" }
 
             if (httpResponse.status.value in 200..299) {
                 val response: ClaudeResponse = httpResponse.body()
@@ -218,20 +229,31 @@ class ClaudeApiClient(
             }
 
             val summaryPrompt = """
-                Please provide a concise summary of the following conversation.
-                Focus on key topics, decisions, and important information discussed.
-                Keep the summary brief but informative (2-4 sentences).
+                You are a conversation summarization assistant. Your task is to create a concise summary of the conversation below.
 
-                Conversation:
+                REQUIREMENTS:
+                - Extract and preserve key topics, facts, decisions, and important context
+                - Include specific details (numbers, names, technical terms) if mentioned
+                - Use clear, concise language
+                - Length: 5-8 sentences
+                - Format: One paragraph, no bullet points
+                - Focus on WHAT was discussed and any conclusions reached
+
+                CONVERSATION TO SUMMARIZE:
                 $conversationText
+
+                SUMMARY:
             """.trimIndent()
 
             val summaryRequest = ClaudeRequest(
                 model = settingsManager.getModel(chatId),
-                maxTokens = 500, // Short summary
+                maxTokens = 500, // Concise summary (5-8 sentences)
                 messages = listOf(Message(role = "user", content = summaryPrompt)),
                 temperature = 0.3 // Lower temperature for consistent summaries
+                // Note: system is omitted (not null) when not needed
             )
+
+            logger.info { "Summary request: model=${summaryRequest.model}, maxTokens=${summaryRequest.maxTokens}, messages count=${summaryRequest.messages.size}" }
 
             val httpResponse = client.post(config.apiUrl) {
                 contentType(ContentType.Application.Json)
@@ -249,7 +271,13 @@ class ClaudeApiClient(
                 logger.info { "Generated summary (${summary.length} chars): ${summary.take(100)}..." }
                 summary
             } else {
-                logger.error { "Failed to generate summary: ${httpResponse.status}" }
+                val errorBody = try {
+                    val errorResponse: ClaudeErrorResponse = httpResponse.body()
+                    "Error type: ${errorResponse.error?.type}, message: ${errorResponse.error?.message}"
+                } catch (e: Exception) {
+                    "Could not parse error response"
+                }
+                logger.error { "Failed to generate summary: ${httpResponse.status}. $errorBody" }
                 "Summary generation failed"
             }
         } catch (e: Exception) {

@@ -2,7 +2,9 @@ package com.aiassist.bot.model
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.JsonInclude
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 data class ClaudeRequest(
     val model: String,
     @JsonProperty("max_tokens")

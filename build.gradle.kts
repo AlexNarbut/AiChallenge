@@ -5,6 +5,7 @@ plugins {
     id("io.spring.dependency-management") version "1.1.4"
     kotlin("jvm") version "1.9.21"
     kotlin("plugin.spring") version "1.9.21"
+    kotlin("plugin.jpa") version "1.9.21"
 }
 
 group = "com.aiassist"
@@ -23,6 +24,7 @@ dependencies {
     // Spring Boot
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
 
     // Ktor Client for HTTP requests
@@ -47,6 +49,10 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor:1.7.3")
+
+    // Database - SQLite
+    implementation("org.xerial:sqlite-jdbc:3.44.1.0")
+    implementation("org.hibernate.orm:hibernate-community-dialects:6.3.1.Final")
 
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")

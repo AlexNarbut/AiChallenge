@@ -550,7 +550,7 @@ The bot provides helpful approximations when setting tokens:
 
 ## Conversation History Management Feature
 
-The bot implements intelligent conversation history management with automatic compression to optimize token usage and reduce API costs.
+The bot implements intelligent conversation history management with automatic compression to optimize token usage and reduce API costs. **All conversation data is persisted to SQLite database**, ensuring history survives bot restarts.
 
 **Strategy: Hybrid Sliding Window + Summaries**
 
@@ -562,10 +562,20 @@ The bot uses a sophisticated approach combining:
 **Key Components:**
 
 **ConversationHistoryManager** (`service/ConversationHistoryManager.kt`):
-- Manages conversation history per user
+- Manages conversation history per user with SQLite persistence
 - Automatically triggers compression when needed
-- Stores summaries and recent messages separately
+- Stores messages and summaries in database tables
 - Provides statistics and history display
+
+**Database Tables:**
+- `chat_messages` - Stores individual messages (user/assistant)
+  - Fields: id, chat_id, role, content, created_at, is_summarized
+- `chat_summaries` - Stores compression summaries
+  - Fields: id, chat_id, summary_text, messages_summarized, created_at, sequence_number
+
+**Repositories:**
+- `ChatMessageRepository` - CRUD operations for messages
+- `ChatSummaryRepository` - CRUD operations for summaries
 
 **Configuration Parameters:**
 - `DEFAULT_HISTORY_THRESHOLD` = 8000 tokens - Default compression trigger
@@ -699,9 +709,206 @@ Summaries are generated using Claude API with:
 
 **Benefits:**
 
-1. **Cost Optimization**: Reduces token usage by up to 80%
-2. **Context Preservation**: Important information retained in summaries
-3. **No Token Limit Issues**: Prevents hitting Claude's 200K context limit
-4. **Transparent**: Works automatically without user intervention
-5. **Flexible**: Manual compression available via `/summarize`
-6. **Informative**: Users can view history and statistics anytime
+1. **Persistent Storage**: All messages and summaries saved to SQLite database
+2. **Survives Restarts**: History preserved even after bot restart or server reboot
+3. **Cost Optimization**: Reduces token usage by up to 80%
+4. **Context Preservation**: Important information retained in summaries
+5. **No Token Limit Issues**: Prevents hitting Claude's 200K context limit
+6. **Transparent**: Works automatically without user intervention
+7. **Flexible**: Manual compression available via `/summarize` (forces compression even if below threshold)
+8. **Informative**: Users can view history and statistics anytime
+
+**Manual Compression (`/summarize`):**
+- Forces compression regardless of token threshold
+- Useful for creating summaries before important context switches
+- Requires minimum 4 messages in history
+- **Behavior:** Keeps only the last 2 messages, summarizes all previous messages via Claude API
+- **Summary prompt:** Structured prompt focusing on key topics, facts, decisions, and technical details
+- **Summary length:** 5-8 sentences (500 tokens max)
+- Temperature: 0.3 for consistent summaries
+- **JSON serialization:** Configured to exclude null values (Jackson NON_NULL policy)
+
+## Database Persistence (SQLite)
+
+The bot uses SQLite for persistent storage of all conversation history. This ensures data survives application restarts and provides a foundation for advanced features.
+
+**Database Configuration** (`application.yml`):
+```yaml
+spring:
+  datasource:
+    url: jdbc:sqlite:${DB_PATH:./data/aiassist.db}
+    driver-class-name: org.sqlite.JDBC
+
+  jpa:
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    hibernate:
+      ddl-auto: update  # Auto-creates tables on startup
+    properties:
+      hibernate:
+        id:
+          new_generator_mappings: false  # SQLite compatibility
+```
+
+**Important Note:**
+- Entities use `@GeneratedValue(strategy = GenerationType.AUTO)` for SQLite compatibility
+- Old generator mappings (`new_generator_mappings: false`) required for SQLite JDBC driver
+- If you encounter "not implemented by SQLite JDBC driver" error, delete `./data/aiassist.db` and restart
+
+**Database Location:**
+- Default: `./data/aiassist.db` (relative to working directory)
+- Configurable via `DB_PATH` environment variable
+- Example: `DB_PATH=/var/lib/aiassist/bot.db ./gradlew bootRun`
+
+**Database Schema:**
+
+**Table: `chat_messages`**
+- `id` (PRIMARY KEY) - Auto-incrementing message ID
+- `chat_id` - Telegram chat ID (indexed)
+- `role` - Message role ("user" or "assistant")
+- `content` - Message text (TEXT column, unlimited length)
+- `created_at` - Timestamp when message was created
+- `is_summarized` - Boolean flag (false = recent, true = compressed into summary)
+
+**Table: `chat_summaries`**
+- `id` (PRIMARY KEY) - Auto-incrementing summary ID
+- `chat_id` - Telegram chat ID (indexed)
+- `summary_text` - Summary content (TEXT column)
+- `messages_summarized` - Count of messages in this summary
+- `created_at` - Timestamp when summary was created
+- `sequence_number` - Order of summaries (0 = oldest)
+
+**Key Features:**
+
+1. **Automatic Schema Creation**:
+   - Tables created automatically on first run (hibernate ddl-auto: update)
+   - No manual database setup required
+
+2. **Data Lifecycle**:
+   - `/clear` command deletes ALL history from database for that chat
+   - Messages marked as `is_summarized=true` are kept for audit purposes
+   - Summaries persist until `/clear` or manual deletion
+
+3. **Transaction Safety**:
+   - All write operations use `@Transactional` annotation
+   - Ensures data consistency during compression and merging
+
+4. **Database Backup**:
+   - Simply copy `./data/aiassist.db` file for backup
+   - Stop bot before copying to ensure consistency
+   - Restore by replacing file and restarting bot
+
+5. **Database Inspection**:
+```bash
+# View database with sqlite3 CLI
+sqlite3 ./data/aiassist.db
+
+# Useful queries:
+SELECT COUNT(*) FROM chat_messages WHERE chat_id = 343222972;
+SELECT * FROM chat_summaries ORDER BY created_at DESC;
+SELECT COUNT(*) FROM chat_messages WHERE is_summarized = 0;
+```
+
+**Environment Variables:**
+- `DB_PATH` - Database file path (default: `./data/aiassist.db`)
+- `DB_SHOW_SQL` - Show SQL queries in logs (default: `false`)
+
+**Dependencies** (`build.gradle.kts`):
+- `spring-boot-starter-data-jpa` - JPA/Hibernate support
+- `sqlite-jdbc:3.44.1.0` - SQLite JDBC driver
+- `hibernate-community-dialects:6.3.1.Final` - SQLite dialect for Hibernate
+
+## Performance Monitoring and Optimization
+
+The bot includes detailed performance logging to track API call durations and identify bottlenecks.
+
+**Performance Metrics Logged:**
+
+1. **Database Operations:**
+   - `💾 Saved message to DB` - Time to save message to database
+   - `📚 Loaded history for chat` - Time to load history from database
+   - Shows: summary count, recent message count, total messages
+
+2. **Claude API Calls:**
+   - `📊 Request stats` - Input size (messages, characters, estimated tokens)
+   - `⏱️ Claude API call took Xms` - **Actual API response time**
+   - Response metrics (input/output tokens, cost, model)
+
+**Example Log Output:**
+```
+📚 Loaded history: 0 summaries, 2 recent messages, 2 total API messages (15ms)
+📊 Request stats: 3 messages, ~450 chars (~150 tokens), model: claude-sonnet-4-5-20250929, max_tokens: 4096
+⏱️ Claude API call took 28547ms (28.547s)
+Response: 1523 input tokens, 456 output tokens, cost: 0.011340$
+```
+
+**Typical Response Times:**
+
+- **Fast (1-5s)**: Short messages, small context, Haiku model
+- **Normal (5-15s)**: Medium messages, moderate context, Sonnet model
+- **Slow (15-40s)**: Long messages, large context, Opus model or reasoning modes
+- **Very Slow (40-60s)**: Maximum tokens (8000+), expert panel mode, large history
+
+**Performance Factors:**
+
+1. **Model Selection** (biggest impact):
+   - Haiku 4.5: Fastest (~2-8s)
+   - Sonnet 4.5: Balanced (~5-20s)
+   - Opus 4.1: Slowest (~10-40s)
+
+2. **Max Tokens Setting**:
+   - 1000 tokens: Fast
+   - 4000 tokens: Medium (default)
+   - 8000+ tokens: Slow
+
+3. **Context Size**:
+   - Small (< 2000 tokens): Fast
+   - Medium (2000-5000 tokens): Normal
+   - Large (5000-10000 tokens): Slow
+
+4. **Reasoning Modes**:
+   - Normal mode: Fast
+   - Expert Panel mode: Slowest (complex reasoning)
+
+**Optimization Tips:**
+
+1. **Use Haiku for simple queries**:
+   ```
+   /model_haiku
+   ```
+
+2. **Reduce max tokens for faster responses**:
+   ```
+   /set_tokens 2000
+   ```
+
+3. **Compress history regularly**:
+   ```
+   /summarize
+   ```
+
+4. **Clear old conversations**:
+   ```
+   /clear
+   ```
+
+5. **Monitor logs** to identify slow queries:
+   ```bash
+   grep "⏱️ Claude API" logs/app.log
+   ```
+
+**Network Issues:**
+
+If API calls consistently take > 60s:
+- Check internet connection
+- Verify Claude API status: https://status.anthropic.com
+- Check firewall/proxy settings
+- Try different network
+
+**Timeout Configuration:**
+
+Current timeouts (`ClaudeApiClient.kt`):
+- Request timeout: 300000ms (5 minutes)
+- Connect timeout: 60000ms (1 minute)
+- Socket timeout: 300000ms (5 minutes)
+
+These are intentionally high to accommodate long responses.

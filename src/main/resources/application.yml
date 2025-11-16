@@ -2,6 +2,26 @@ spring:
   application:
     name: aiassist-telegram-bot
 
+  # SQLite Database Configuration
+  datasource:
+    url: jdbc:sqlite:${DB_PATH:./data/aiassist.db}
+    driver-class-name: org.sqlite.JDBC
+    username: ""
+    password: ""
+
+  jpa:
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    hibernate:
+      ddl-auto: update # Creates tables automatically
+    show-sql: ${DB_SHOW_SQL:false}
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+        id:
+          new_generator_mappings: false  # Use old generator mappings for SQLite compatibility
+
 server:
   port: 3000
 
