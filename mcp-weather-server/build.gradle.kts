@@ -1,5 +1,3 @@
-import java.util.Properties
-
 plugins {
     kotlin("jvm") version "2.1.10"
     kotlin("plugin.serialization") version "2.1.10"
@@ -36,22 +34,15 @@ dependencies {
 
     // Logging
     implementation("org.slf4j:slf4j-simple:2.0.9")
-
-    // Testing
-    testImplementation("org.jetbrains.kotlin:kotlin-test")
-    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
-    testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 application {
-    mainClass.set("com.mcp.weather.WeatherServerKt")
+    mainClass.set("com.mcp.weather.ApplicationKt")
 }
 
 tasks.jar {
     manifest {
-        attributes["Main-Class"] = "com.mcp.weather.WeatherServerKt"
+        attributes["Main-Class"] = "com.mcp.weather.ApplicationKt"
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
@@ -59,21 +50,4 @@ tasks.jar {
 
 kotlin {
     jvmToolchain(17)
-}
-
-tasks.withType<Test> {
-    useJUnitPlatform()
-
-    // Load API key from local.properties
-    val localPropertiesFile = file("local.properties")
-    if (localPropertiesFile.exists()) {
-        val localProperties = Properties()
-        localPropertiesFile.inputStream().use { stream ->
-            localProperties.load(stream)
-        }
-        val apiKey = localProperties.getProperty("OPENWEATHER_API_KEY", "")
-        if (apiKey.isNotEmpty()) {
-            environment("OPENWEATHER_API_KEY", apiKey)
-        }
-    }
 }

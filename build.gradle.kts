@@ -3,9 +3,10 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 plugins {
     id("org.springframework.boot") version "3.2.0"
     id("io.spring.dependency-management") version "1.1.4"
-    kotlin("jvm") version "1.9.21"
-    kotlin("plugin.spring") version "1.9.21"
-    kotlin("plugin.jpa") version "1.9.21"
+    kotlin("jvm") version "2.1.10"
+    kotlin("plugin.spring") version "2.1.10"
+    kotlin("plugin.jpa") version "2.1.10"
+    kotlin("plugin.serialization") version "2.1.10"
 }
 
 group = "com.aiassist"
@@ -49,6 +50,15 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor:1.7.3")
+
+    // MCP SDK for stdio client
+    implementation("io.modelcontextprotocol:kotlin-sdk:0.5.0") {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-json")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-json-jvm")
+    }
+    implementation("org.jetbrains.kotlinx:kotlinx-io-core:0.6.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.7.3")
 
     // Database - SQLite
     implementation("org.xerial:sqlite-jdbc:3.44.1.0")

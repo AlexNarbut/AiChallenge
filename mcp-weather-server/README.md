@@ -49,18 +49,23 @@ code ~/Library/Application\ Support/Claude/claude_desktop_config.json
 {
   "mcpServers": {
     "weather": {
-      "command": "java",
+      "command": "/Users/alexnarbut/Library/Java/JavaVirtualMachines/corretto-17.0.7/Contents/Home/bin/java",
       "args": [
         "-jar",
         "/Users/alexnarbut/AiAssistSpring/mcp-weather-server/build/libs/mcp-weather-server-1.0.0.jar"
       ],
       "env": {
-        "OPENWEATHER_API_KEY": "your-api-key-here"
+        "OPENWEATHER_API_KEY": "c6dc29e33173e6e9924fb2b301fa5293"
       }
     }
   }
 }
 ```
+
+**Важно:** Используйте полный путь к Java 17 (`/Users/alexnarbut/Library/Java/JavaVirtualMachines/corretto-17.0.7/Contents/Home/bin/java`), а НЕ просто `java`. Это необходимо, так как:
+- JAR скомпилирован для Java 17 (class file version 61.0)
+- Системный `/usr/bin/java` может быть старой версией (Java 15 или ниже)
+- Claude Desktop использует PATH из системы, который может указывать на старую версию Java
 
 3. Перезапустите Claude Desktop
 
@@ -199,6 +204,27 @@ mcp-weather-server/
 6. Логи выводятся в stderr (видны в логах Claude Desktop)
 
 ## Troubleshooting
+
+### "Could not find or load main class com.mcp.weather.ApplicationKt"
+
+Эта ошибка возникает когда Claude Desktop использует старую версию Java (15 или ниже), а JAR скомпилирован для Java 17.
+
+**Решение:**
+1. Проверьте какую версию Java использует система:
+```bash
+/usr/bin/java -version  # может показать Java 15 или ниже
+```
+
+2. Убедитесь что в конфигурации Claude Desktop указан **полный путь** к Java 17:
+```json
+"command": "/Users/alexnarbut/Library/Java/JavaVirtualMachines/corretto-17.0.7/Contents/Home/bin/java"
+```
+
+НЕ используйте просто `"command": "java"` - это может использовать системную Java, которая слишком старая.
+
+### "UnsupportedClassVersionError: class file version 61.0"
+
+Это та же проблема - используется старая версия Java. Следуйте решению выше.
 
 ### "OPENWEATHER_API_KEY environment variable is required"
 

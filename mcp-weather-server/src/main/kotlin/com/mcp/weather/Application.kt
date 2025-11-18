@@ -7,15 +7,21 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.utils.io.streams.asInput
-import io.modelcontextprotocol.kotlin.sdk.*
-import io.modelcontextprotocol.kotlin.sdk.server.*
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.runBlocking
+import io.modelcontextprotocol.kotlin.sdk.CallToolResult
+import io.modelcontextprotocol.kotlin.sdk.Implementation
+import io.modelcontextprotocol.kotlin.sdk.ServerCapabilities
+import io.modelcontextprotocol.kotlin.sdk.TextContent
+import io.modelcontextprotocol.kotlin.sdk.Tool
+import io.modelcontextprotocol.kotlin.sdk.server.Server
+import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
+import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.io.asSink
 import kotlinx.io.buffered
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 
 // Weather API models
@@ -182,14 +188,20 @@ fun main() {
 
     System.err.println("✅ Weather MCP Server ready (waiting for requests via stdio)")
 
-    // Connect and wait indefinitely for cancellation
+    // Connect and run server until cancelled
     runBlocking {
-        server.connect(transport)
-        try {
-            awaitCancellation()
-        } catch (e: Exception) {
-            System.err.println("🌤️ Server cancelled: ${e.message}")
+        val job = launch {
+            try {
+                server.connect(transport)
+                // This will suspend forever until the job is cancelled
+                awaitCancellation()
+            } catch (e: Exception) {
+                System.err.println("🌤️ Server exception: ${e.message}")
+            }
         }
+
+        // Wait for the job to complete
+        job.join()
     }
 
     System.err.println("🌤️ Server shutting down")
